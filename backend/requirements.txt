@@ -21,6 +21,7 @@ psycopg[binary,pool]
 chromadb
 ollama
 pypdf
+alibabacloud_dypnsapi20170525
 pytest
 pytest-asyncio
 aiosqlite
