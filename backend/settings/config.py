@@ -1,7 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,11 +46,11 @@ class Settings(BaseSettings):
     payment_mode: str = "mock"
     mock_payment_enabled: bool = True
 
-    aliyun_sms_access_key_id: str = Field(default="")
-    aliyun_sms_access_key_secret: str = Field(default="")
-    aliyun_sms_sign_name: str = Field(default="")
-    aliyun_sms_template_code: str = "100001"
-    aliyun_sms_endpoint: str = "dypnsapi.aliyuncs.com"
+    spug_sms_base_url: str = "https://push.spug.cc"
+    spug_sms_template_id: str = ""
+    spug_sms_template_name: str = "PetMall"
+    spug_sms_code_param_name: str = "code"
+    spug_sms_timeout_seconds: float = 10.0
     sms_code_expire_seconds: int = 300
     sms_send_cooldown_seconds: int = 60
     sms_debug_code_enabled: bool = False

@@ -1,7 +1,9 @@
-import json
 import secrets
 import string
 from dataclasses import dataclass
+from urllib.parse import quote
+
+import httpx
 
 from settings.config import get_settings
 
@@ -25,42 +27,53 @@ class SmsService:
         if self.settings.sms_debug_code_enabled:
             return SmsSendResult(success=True, message="debug sms code generated", code=code)
 
-        if not self.settings.aliyun_sms_access_key_id or not self.settings.aliyun_sms_access_key_secret:
-            return SmsSendResult(success=False, message="Aliyun SMS access key is not configured")
-        if not self.settings.aliyun_sms_sign_name:
-            return SmsSendResult(success=False, message="Aliyun SMS sign name is not configured")
+        template_id = self.settings.spug_sms_template_id.strip()
+        if not template_id:
+            return SmsSendResult(success=False, message="Spug SMS template id is not configured")
 
+        base_url = self.settings.spug_sms_base_url.rstrip("/")
+        url = f"{base_url}/sms/{quote(template_id)}"
+        code_param_name = self.settings.spug_sms_code_param_name.strip() or "code"
+        expire_minutes = max(1, self.settings.sms_code_expire_seconds // 60)
+        payload = {
+            "name": self.settings.spug_sms_template_name,
+            code_param_name: code,
+            "number": f"{expire_minutes:02d}",
+            "to": phone,
+        }
         try:
-            from alibabacloud_dypnsapi20170525 import models as dypnsapi_models
-            from alibabacloud_dypnsapi20170525.client import Client as DypnsapiClient
-            from alibabacloud_tea_openapi import models as open_api_models
-        except ImportError as exc:
-            return SmsSendResult(success=False, message=f"Aliyun SMS SDK is not installed: {exc}")
+            response = httpx.post(
+                url,
+                json=payload,
+                timeout=self.settings.spug_sms_timeout_seconds,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            return SmsSendResult(
+                success=False,
+                message=f"Spug SMS rejected: HTTP {exc.response.status_code} {exc.response.text[:200]}",
+            )
+        except httpx.HTTPError as exc:
+            return SmsSendResult(success=False, message=f"Spug SMS request failed: {exc}")
 
-        config = open_api_models.Config(
-            access_key_id=self.settings.aliyun_sms_access_key_id,
-            access_key_secret=self.settings.aliyun_sms_access_key_secret,
-            endpoint=self.settings.aliyun_sms_endpoint,
-        )
-        client = DypnsapiClient(config)
-        template_param = {"code": code, "min": str(self.settings.sms_code_expire_seconds // 60)}
-        request = dypnsapi_models.SendSmsVerifyCodeRequest(
-            phone_number=phone,
-            sign_name=self.settings.aliyun_sms_sign_name,
-            template_code=self.settings.aliyun_sms_template_code,
-            template_param=json.dumps(template_param),
-        )
-        try:
-            response = client.send_sms_verify_code(request)
-        except Exception as exc:
-            return SmsSendResult(success=False, message=f"Aliyun SMS SDK call failed: {exc}")
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                data = response.json()
+            except ValueError:
+                return SmsSendResult(success=False, message="Spug SMS response is not valid JSON")
+            if isinstance(data, dict) and data.get("error"):
+                return SmsSendResult(success=False, message=f"Spug SMS rejected: {data['error']}")
+            if isinstance(data, dict) and "code" in data:
+                response_code = data.get("code")
+                if response_code not in (0, 200, "0", "200", "OK", "ok"):
+                    response_message = data.get("msg") or data.get("message") or data
+                    return SmsSendResult(
+                        success=False,
+                        message=f"Spug SMS rejected: {response_message}",
+                    )
 
-        body = getattr(response, "body", None)
-        response_code = getattr(body, "code", None)
-        response_message = getattr(body, "message", "")
-        if response_code == "OK":
-            return SmsSendResult(success=True, message="SMS sent", code=code)
-        return SmsSendResult(success=False, message=f"Aliyun SMS rejected: {response_message}")
+        return SmsSendResult(success=True, message="SMS sent", code=code)
 
 
 def get_sms_service() -> SmsService:
