@@ -53,15 +53,22 @@ async def create_qa_session(db: AsyncSession, user: User, payload: QaSessionCrea
     return session
 
 
-async def get_user_session(db: AsyncSession, user_id: int, session_id: int) -> AgentSession:
+async def get_user_session(
+    db: AsyncSession,
+    user_id: int,
+    session_id: int,
+    agent_type: str | None = "qa",
+) -> AgentSession:
+    filters = [
+        AgentSession.id == session_id,
+        AgentSession.user_id == user_id,
+    ]
+    if agent_type is not None:
+        filters.append(AgentSession.agent_type == agent_type)
     result = await db.execute(
         select(AgentSession)
         .options(selectinload(AgentSession.messages))
-        .where(
-            AgentSession.id == session_id,
-            AgentSession.user_id == user_id,
-            AgentSession.agent_type == "qa",
-        )
+        .where(*filters)
     )
     session = result.scalar_one_or_none()
     if session is None:

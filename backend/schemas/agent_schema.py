@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,6 +11,16 @@ class QaSessionCreate(BaseModel):
 
 class QaMessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
+
+
+class GuideSessionCreate(BaseModel):
+    title: str | None = Field(default=None, max_length=128)
+    pet_id: int | None = None
+
+
+class GuideMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+    limit: int = Field(default=5, ge=1, le=10)
 
 
 class AgentMessageResponse(BaseModel):
@@ -41,3 +52,19 @@ class QaAnswerResponse(BaseModel):
     session_id: int
     user_message: AgentMessageResponse
     assistant_message: AgentMessageResponse
+
+
+class GuideRecommendationResponse(BaseModel):
+    product_id: int
+    sku_id: int | None = None
+    rank: int
+    reason: str
+    caution: str | None = None
+    product: dict[str, Any]
+
+
+class GuideAnswerResponse(BaseModel):
+    session_id: int
+    user_message: AgentMessageResponse
+    assistant_message: AgentMessageResponse
+    recommendations: list[GuideRecommendationResponse]
