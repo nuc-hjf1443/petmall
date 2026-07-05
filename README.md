@@ -48,7 +48,6 @@ petmall/
 │   ├── main.py              FastAPI 入口
 │   └── requirements.txt     Python 依赖
 ├── frontend/                uni-app 前端
-├── docs/                    项目文档
 └── deploy/                  部署模板
 ```
 
@@ -124,12 +123,10 @@ Copy-Item backend\.env.example backend\.env
 - 支付宝沙箱和本地 mock 双模式支付
 - 前端业务页面
 
-## 建议开发顺序
+## 开发顺序
 
 1. 用户系统、配置加载、数据库会话和鉴权依赖。
 2. 宠物档案、用户及宠物详细资料、资料完整度。
 3. 智能体与 RAG：导购 Agent、问答 Agent、知识库上传和向量化。
 4. 商城、购物车、订单、支付结果。
 5. 社区、宠物币、领养和后台审核。
-
-详细设计见 `docs/宠物商城开发设计文档.md`。
