@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     vector_store_dir: str = "generated/vector_store"
     max_upload_size_mb: int = 20
 
+    llm_provider: str = "deepseek"
+    llm_model: str = "deepseek-chat"
+    llm_api_key: str = ""
+    llm_temperature: float = 0.2
+    agent_memory_postgres_dsn: str = ""
+    agent_memory_setup_on_start: bool = False
+
     payment_mode: str = "mock"
     mock_payment_enabled: bool = True
 
