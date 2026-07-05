@@ -34,7 +34,9 @@ class DeferredCoinRewardAdapter:
 
 
 def get_coin_reward_adapter() -> CoinRewardAdapter:
-    return DeferredCoinRewardAdapter()
+    from services.coin_service import RealCoinRewardAdapter
+
+    return RealCoinRewardAdapter()
 
 
 def _response(order: Order) -> OrderResponse:
