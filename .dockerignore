@@ -1,0 +1,11 @@
+.git/
+.idea/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+backend/.env
+backend/generated/
+frontend/unpackage/
+frontend/node_modules/
