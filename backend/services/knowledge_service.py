@@ -41,7 +41,9 @@ class UnavailablePetProfileDocumentAdapter:
 
 
 def get_pet_profile_document_adapter() -> PetProfileDocumentAdapter:
-    return UnavailablePetProfileDocumentAdapter()
+    from services.profile_document_service import RealPetProfileDocumentAdapter
+
+    return RealPetProfileDocumentAdapter()
 
 
 def _kb_response(kb: KnowledgeBase) -> KnowledgeBaseResponse:

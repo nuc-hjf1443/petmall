@@ -42,6 +42,23 @@ from models.knowledge import (
     KnowledgeTask,
     RagRetrievalLog,
 )
+from models.pet import (
+    PetAlbum,
+    PetDetailProfile,
+    PetGrowthRecord,
+    PetHealthReminder,
+    PetProfile,
+    PetProfileDocument,
+    PetReminderStatus,
+)
+from models.coin import (
+    CoinLogType,
+    CoinTask,
+    CoinTaskRecord,
+    DailyCheckin,
+    PetCoinAccount,
+    PetCoinLog,
+)
 
 __all__ = [
     "AdminActionLog",
@@ -95,4 +112,17 @@ __all__ = [
     "KnowledgeTask",
     "RagRetrievalLog",
     "DocumentStatus",
+    "PetProfile",
+    "PetGrowthRecord",
+    "PetHealthReminder",
+    "PetAlbum",
+    "PetDetailProfile",
+    "PetProfileDocument",
+    "PetReminderStatus",
+    "PetCoinAccount",
+    "PetCoinLog",
+    "CoinTask",
+    "CoinTaskRecord",
+    "DailyCheckin",
+    "CoinLogType",
 ]

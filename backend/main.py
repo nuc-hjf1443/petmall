@@ -6,10 +6,12 @@ from routers import adoption_router, admin_router, agent_router, auth_router, me
 from routers import (
     auth_router,
     cart_router,
+    coin_router,
     community_router,
     knowledge_router,
     order_router,
     payment_router,
+    pet_router,
     product_router,
     user_router,
 )
@@ -37,6 +39,8 @@ app.mount(
 
 app.include_router(auth_router.router)
 app.include_router(user_router.router)
+app.include_router(pet_router.router)
+app.include_router(coin_router.router)
 app.include_router(product_router.router)
 app.include_router(cart_router.router)
 app.include_router(order_router.router)
