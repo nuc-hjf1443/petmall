@@ -1,7 +1,7 @@
 """add knowledge and rag tables
 
-Revision ID: 0005_knowledge_rag
-Revises: 0004_community
+Revision ID: 0006_knowledge_rag
+Revises: 0005_community
 """
 from typing import Sequence
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0005_knowledge_rag"
-down_revision: str | None = "0004_community"
+revision: str = "0006_knowledge_rag"
+down_revision: str | None = "0005_community"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 

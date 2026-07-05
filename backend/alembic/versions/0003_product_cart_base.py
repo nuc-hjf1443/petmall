@@ -1,7 +1,7 @@
 """create product category sku and cart tables
 
-Revision ID: 0002_product_cart_base
-Revises: 0001_user_auth_profile_address
+Revision ID: 0003_product_cart_base
+Revises: 0002_c_adoption_merchant_admin_agent
 Create Date: 2026-07-05
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0002_product_cart_base"
-down_revision: str | None = "0001_user_auth_profile_address"
+revision: str = "0003_product_cart_base"
+down_revision: str | None = "0002_c_adoption_merchant_admin_agent"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

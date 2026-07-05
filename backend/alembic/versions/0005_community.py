@@ -1,7 +1,7 @@
 """add community tables
 
-Revision ID: 0004_community
-Revises: 0003_order_payment
+Revision ID: 0005_community
+Revises: 0004_order_payment
 """
 from typing import Sequence
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0004_community"
-down_revision: str | None = "0003_order_payment"
+revision: str = "0005_community"
+down_revision: str | None = "0004_order_payment"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 

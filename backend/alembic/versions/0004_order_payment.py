@@ -1,7 +1,7 @@
 """add order and payment tables
 
-Revision ID: 0003_order_payment
-Revises: 0002_product_cart_base
+Revision ID: 0004_order_payment
+Revises: 0003_product_cart_base
 """
 from typing import Sequence
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0003_order_payment"
-down_revision: str | None = "0002_product_cart_base"
+revision: str = "0004_order_payment"
+down_revision: str | None = "0003_product_cart_base"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
