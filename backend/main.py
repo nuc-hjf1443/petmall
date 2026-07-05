@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from routers import adoption_router, admin_router, agent_router, auth_router, merchant_router, user_router
 from routers import (
     auth_router,
     cart_router,
@@ -42,6 +43,10 @@ app.include_router(order_router.router)
 app.include_router(payment_router.router)
 app.include_router(community_router.router)
 app.include_router(knowledge_router.router)
+app.include_router(adoption_router.router)
+app.include_router(merchant_router.router)
+app.include_router(admin_router.router)
+app.include_router(agent_router.router)
 
 
 @app.get("/")

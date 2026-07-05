@@ -8,6 +8,10 @@ from models.product import (
     ProductSku,
     ProductStatus,
 )
+from models.adoption import AdoptionApplication, AdoptionFollowUp, AdoptionPet
+from models.agent import AgentMessage, AgentSession
+from models.audit import AdminActionLog, AuditLog, OperationLog
+from models.merchant import Merchant, MerchantQualification, MerchantStaff
 from models.user import User, UserAddress, UserProfile
 from models.order import (
     AfterSale,
@@ -39,6 +43,23 @@ from models.knowledge import (
     RagRetrievalLog,
 )
 
+__all__ = [
+    "AdminActionLog",
+    "AdoptionApplication",
+    "AdoptionFollowUp",
+    "AdoptionPet",
+    "AgentMessage",
+    "AgentSession",
+    "AuditLog",
+    "Base",
+    "Merchant",
+    "MerchantQualification",
+    "MerchantStaff",
+    "OperationLog",
+    "User",
+    "UserAddress",
+    "UserProfile",
+]
 __all__ = [
     "Base",
     "CartItem",
