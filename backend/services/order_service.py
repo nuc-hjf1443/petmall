@@ -13,11 +13,15 @@ from repository.order_repository import (
     get_cart_items_for_checkout,
     get_order,
     get_order_item,
+    get_order_reward_delivery,
     list_orders,
     lock_skus,
 )
 from schemas.order_schema import OrderCreate, OrderItemResponse, OrderResponse
 from services.user_service import get_address_snapshot
+
+
+ORDER_REWARD_MAX_ATTEMPTS = 3
 
 
 class CoinRewardAdapter(Protocol):
@@ -30,7 +34,7 @@ class DeferredCoinRewardAdapter:
     async def grant_order_reward(
         self, *, user_id: int, order_id: int, pay_amount: int, idempotency_key: str
     ) -> None:
-        return None
+        raise conflict("Coin reward integration is unavailable")
 
 
 def get_coin_reward_adapter() -> CoinRewardAdapter:
@@ -203,6 +207,32 @@ async def transition_fulfillment(db: AsyncSession, order_id: int, target_status:
     await db.commit()
 
 
+async def _deliver_order_reward(
+    db: AsyncSession,
+    order: Order,
+    delivery: OrderRewardDelivery,
+    reward_adapter: CoinRewardAdapter,
+) -> None:
+    delivery.status = "pending"
+    delivery.error_message = None
+    for attempt in range(1, ORDER_REWARD_MAX_ATTEMPTS + 1):
+        try:
+            await reward_adapter.grant_order_reward(
+                user_id=order.user_id,
+                order_id=order.id,
+                pay_amount=order.pay_amount,
+                idempotency_key=delivery.idempotency_key,
+            )
+        except Exception as exc:
+            if attempt == ORDER_REWARD_MAX_ATTEMPTS:
+                delivery.status = "failed"
+                delivery.error_message = str(exc)[:1000]
+        else:
+            delivery.status = "delivered"
+            break
+    await db.commit()
+
+
 async def confirm_receipt(
     db: AsyncSession,
     user_id: int,
@@ -213,7 +243,12 @@ async def confirm_receipt(
     if order is None:
         raise not_found("Order not found")
     if order.status == OrderStatus.COMPLETED.value:
-        raise conflict("Order receipt already confirmed")
+        delivery = await get_order_reward_delivery(db, order.id, lock=True)
+        if delivery is None or delivery.status == "delivered":
+            raise conflict("Order receipt already confirmed")
+        await _deliver_order_reward(db, order, delivery, reward_adapter)
+        await db.refresh(order)
+        return _response(order)
     if order.status != OrderStatus.PENDING_RECEIPT.value:
         raise conflict("Order cannot be confirmed in current status")
     key = f"order:{order.id}:receipt_reward"
@@ -224,19 +259,7 @@ async def confirm_receipt(
     order.completed_at = utc_now()
     db.add(delivery)
     await db.commit()
-    try:
-        await reward_adapter.grant_order_reward(
-            user_id=user_id,
-            order_id=order.id,
-            pay_amount=order.pay_amount,
-            idempotency_key=key,
-        )
-        delivery.status = "delivered"
-        delivery.error_message = None
-    except Exception as exc:
-        delivery.status = "failed"
-        delivery.error_message = str(exc)[:1000]
-    await db.commit()
+    await _deliver_order_reward(db, order, delivery, reward_adapter)
     await db.refresh(order)
     return _response(order)
 

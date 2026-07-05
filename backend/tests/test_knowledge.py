@@ -5,7 +5,12 @@ import pytest
 from core.knowledge_queue import get_knowledge_task_publisher
 from core.rag_service import retrieve_platform_knowledge, retrieve_private_knowledge
 from models.knowledge import KnowledgeDocument, KnowledgeTask
-from services.knowledge_service import create_platform_knowledge_document, process_knowledge_task
+from services.knowledge_service import (
+    create_platform_knowledge_document,
+    get_pet_profile_document_adapter,
+    process_knowledge_task,
+)
+from services.profile_document_service import RealPetProfileDocumentAdapter
 from settings.config import get_settings
 from tests.test_order_payment import auth, register
 
@@ -47,6 +52,13 @@ class FakeVectors:
             )
         ]
         return matches[:top_k]
+
+
+async def test_pet_profile_document_uses_real_adapter_by_default():
+    assert isinstance(
+        get_pet_profile_document_adapter(),
+        RealPetProfileDocumentAdapter,
+    )
 
 
 async def test_knowledge_isolation_index_and_delete(test_context, strong_password, tmp_path):
