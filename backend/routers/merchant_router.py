@@ -10,10 +10,12 @@ from schemas.merchant_schema import (
     MerchantDashboardResponse,
     MerchantProductActionResponse,
     MerchantProductDiscountRequest,
+    MerchantProductResponse,
     MerchantProductStatusRequest,
     MerchantResponse,
     MerchantUpdateRequest,
 )
+from schemas.product_schema import ProductCreate, ProductUpdate
 from services.merchant_service import (
     apply_merchant,
     audit_merchant,
@@ -22,11 +24,13 @@ from services.merchant_service import (
     update_my_merchant,
 )
 from services.merchant_product_service import (
+    create_product_for_merchant,
     list_merchant_products,
     set_merchant_product_discount,
     set_merchant_product_off_sale,
     set_merchant_product_on_sale,
     submit_merchant_product,
+    update_product_for_merchant,
 )
 
 
@@ -74,6 +78,25 @@ async def merchant_products(
     db: AsyncSession = Depends(get_db),
 ) -> list:
     return await list_merchant_products(db, current_user.id)
+
+
+@router.post("/merchants/me/products", response_model=MerchantProductResponse)
+async def create_merchant_product_api(
+    payload: ProductCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return {"product": await create_product_for_merchant(db, current_user.id, payload)}
+
+
+@router.put("/merchants/me/products/{product_id}", response_model=MerchantProductResponse)
+async def update_merchant_product_api(
+    product_id: int,
+    payload: ProductUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return {"product": await update_product_for_merchant(db, current_user.id, product_id, payload)}
 
 
 @router.post("/merchants/me/products/{product_id}/submit", response_model=MerchantProductActionResponse)

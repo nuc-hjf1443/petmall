@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -79,7 +80,8 @@ class MerchantProductStatusRequest(BaseModel):
 
 
 class MerchantProductDiscountRequest(BaseModel):
-    discount_rate: float = Field(..., gt=0, le=1)
+    discount_rate: float | None = Field(default=None, gt=0, le=1)
+    sku_prices: dict[int, int] = Field(default_factory=dict)
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     reason: str | None = Field(default=None, max_length=1000)
@@ -90,3 +92,7 @@ class MerchantProductActionResponse(BaseModel):
     merchant_id: int
     action: str
     status: str
+
+
+class MerchantProductResponse(BaseModel):
+    product: dict[str, Any]

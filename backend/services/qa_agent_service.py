@@ -1,7 +1,10 @@
+import json
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.rag_service import retrieve_platform_knowledge, retrieve_private_knowledge
 from core.agent_workflow import run_qa_agent_workflow
 from core.errors import not_found
 from models.agent import AgentMessage, AgentSession
@@ -85,6 +88,45 @@ def _messages_to_history(messages: list[AgentMessage]) -> list[dict[str, str]]:
     ]
 
 
+async def _retrieve_rag_context(db: AsyncSession, user_id: int, query: str) -> tuple[str, str | None]:
+    try:
+        private_results = await retrieve_private_knowledge(db, user_id, query, top_k=3, caller="qa_agent")
+    except Exception:
+        private_results = []
+    try:
+        platform_results = await retrieve_platform_knowledge(db, query, top_k=3, caller="qa_agent")
+    except Exception:
+        platform_results = []
+
+    combined = [
+        {"scope": "private", **item}
+        for item in private_results
+    ] + [
+        {"scope": "platform", **item}
+        for item in platform_results
+    ]
+    if not combined:
+        return "", None
+
+    lines = []
+    references = []
+    for index, item in enumerate(combined, start=1):
+        content = str(item.get("content", "")).strip()
+        metadata = item.get("metadata") or {}
+        score = item.get("score")
+        if not content:
+            continue
+        lines.append(f"[{index}] {content[:800]}")
+        references.append(
+            {
+                "scope": item.get("scope"),
+                "document_id": metadata.get("document_id"),
+                "score": score,
+            }
+        )
+    return "\n".join(lines), json.dumps(references, ensure_ascii=False)
+
+
 async def send_qa_message(
     db: AsyncSession,
     user: User,
@@ -93,10 +135,12 @@ async def send_qa_message(
 ) -> tuple[AgentMessage, AgentMessage]:
     session = await get_user_session(db, user.id, session_id)
     risk_level = assess_risk(content)
+    rag_context, rag_references = await _retrieve_rag_context(db, user.id, content)
     workflow_result = await run_qa_agent_workflow(
         question=content,
         risk_level=risk_level,
         history=_messages_to_history(session.messages),
+        rag_context=rag_context,
         session_id=session_id,
     )
     user_message = AgentMessage(
@@ -110,7 +154,7 @@ async def send_qa_message(
         role="assistant",
         content=workflow_result["answer"],
         risk_level=risk_level,
-        references=workflow_result.get("references"),
+        references=rag_references or workflow_result.get("references"),
     )
     db.add_all([user_message, assistant_message])
     await db.commit()

@@ -12,6 +12,7 @@ class QaWorkflowState(TypedDict, total=False):
     question: str
     risk_level: str
     history: list[dict[str, str]]
+    rag_context: str
     answer: str
     references: str | None
 
@@ -28,11 +29,16 @@ def build_rule_based_qa_answer(risk_level: str) -> str:
     return f"{base} 当前问题暂未命中医疗高风险规则，后续可接入平台知识库和私人知识库后给出更具体回答。"
 
 
-def _build_system_prompt(risk_level: str) -> str:
+def _build_system_prompt(risk_level: str, has_rag_context: bool) -> str:
+    rag_instruction = (
+        "已提供 RAG 检索摘要时，可以基于摘要回答，但不能夸大为完整诊断；"
+        if has_rag_context
+        else "当前没有可用 RAG 检索摘要，不能声称引用了私人知识库、平台知识库或宠物档案。"
+    )
     return (
         "你是宠物综合服务平台的养宠知识问答助手。"
         "请用中文回答，表达清晰、谨慎、可执行。"
-        "当前 RAG 检索尚未接入，不能声称引用了私人知识库、平台知识库或宠物档案。"
+        f"{rag_instruction}"
         "不知道时要说明信息不足，不要编造诊断、药品剂量、检查结果或平台不存在的数据。"
         f"当前风险等级：{risk_level}。"
         "如果涉及医疗、用药、疫苗、驱虫、急症或疑似疾病，必须提示仅供参考，不能替代兽医诊断。"
@@ -52,7 +58,12 @@ def _normalize_history(history: list[dict[str, str]] | None) -> str:
     return "\n".join(lines)
 
 
-async def _call_deepseek(question: str, risk_level: str, history: list[dict[str, str]] | None) -> str | None:
+async def _call_deepseek(
+    question: str,
+    risk_level: str,
+    history: list[dict[str, str]] | None,
+    rag_context: str | None,
+) -> str | None:
     settings = get_settings()
     if settings.llm_provider != "deepseek" or not settings.llm_api_key:
         return None
@@ -69,11 +80,13 @@ async def _call_deepseek(question: str, risk_level: str, history: list[dict[str,
     )
     history_text = _normalize_history(history)
     user_prompt = f"用户问题：{question}"
+    if rag_context:
+        user_prompt = f"RAG 检索摘要：\n{rag_context}\n\n{user_prompt}"
     if history_text:
         user_prompt = f"最近对话：\n{history_text}\n\n{user_prompt}"
     response = await llm.ainvoke(
         [
-            SystemMessage(content=_build_system_prompt(risk_level)),
+            SystemMessage(content=_build_system_prompt(risk_level, bool(rag_context))),
             HumanMessage(content=user_prompt),
         ]
     )
@@ -92,19 +105,26 @@ def _enforce_safety(answer: str, risk_level: str) -> str:
     return result
 
 
+def _build_references(rag_context: str | None) -> str | None:
+    if not rag_context:
+        return None
+    return rag_context[:4000]
+
+
 async def _generate_answer_node(state: QaWorkflowState) -> QaWorkflowState:
     risk_level = state.get("risk_level", "normal")
     answer = await _call_deepseek(
         state.get("question", ""),
         risk_level,
         state.get("history"),
+        state.get("rag_context"),
     )
     if answer is None:
         answer = build_rule_based_qa_answer(risk_level)
     return {
         **state,
         "answer": _enforce_safety(answer, risk_level),
-        "references": None,
+        "references": _build_references(state.get("rag_context")),
     }
 
 
@@ -171,12 +191,14 @@ async def run_qa_agent_workflow(
     question: str,
     risk_level: str,
     history: list[dict[str, str]] | None = None,
+    rag_context: str | None = None,
     session_id: int | None = None,
 ) -> QaWorkflowState:
     state: QaWorkflowState = {
         "question": question,
         "risk_level": risk_level,
         "history": history or [],
+        "rag_context": rag_context or "",
     }
     try:
         if session_id is not None:

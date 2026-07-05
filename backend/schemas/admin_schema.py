@@ -27,6 +27,11 @@ class AdminReasonRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class AdminReportResolveRequest(BaseModel):
+    action: str = Field(..., pattern="^(dismiss|take_down)$")
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class AuditLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
