@@ -9,7 +9,7 @@ from models.product import (
     ProductStatus,
 )
 from models.adoption import AdoptionApplication, AdoptionFollowUp, AdoptionPet
-from models.agent import AgentMessage, AgentSession
+from models.agent import AgentMessage, AgentRecommendation, AgentSession
 from models.audit import AdminActionLog, AuditLog, OperationLog
 from models.merchant import Merchant, MerchantQualification, MerchantStaff
 from models.user import User, UserAddress, UserProfile
@@ -66,6 +66,7 @@ __all__ = [
     "AdoptionFollowUp",
     "AdoptionPet",
     "AgentMessage",
+    "AgentRecommendation",
     "AgentSession",
     "AfterSale",
     "AuditLog",

@@ -17,6 +17,34 @@ class QaWorkflowState(TypedDict, total=False):
     references: str | None
 
 
+class GuideRecommendationState(TypedDict, total=False):
+    product_id: int
+    sku_id: int | None
+    rank: int
+    reason: str
+    caution: str | None
+    source: str
+
+
+class GuideWorkflowState(TypedDict, total=False):
+    question: str
+    risk_level: str
+    history: list[dict[str, str]]
+    rag_context: str
+    pet_summary: dict[str, Any] | None
+    products: list[dict[str, Any]]
+    answer: str
+    recommendations: list[GuideRecommendationState]
+    references: str | None
+
+
+GUIDE_MEDICAL_SAFETY_TEXT = (
+    "Medical, medication, prescription diet, or emergency content is for reference only "
+    "and cannot replace a veterinarian diagnosis."
+)
+GUIDE_HIGH_RISK_TEXT = "For possible emergency symptoms, contact an offline veterinarian as soon as possible."
+
+
 def build_rule_based_qa_answer(risk_level: str) -> str:
     base = "我会先根据你提供的信息给出日常养宠建议。"
     if risk_level == "high":
@@ -214,3 +242,181 @@ async def run_qa_agent_workflow(
             "answer": build_rule_based_qa_answer(risk_level),
             "references": None,
         }
+
+
+def _first_in_stock_sku(product: dict[str, Any]) -> dict[str, Any] | None:
+    for sku in product.get("skus") or []:
+        if sku.get("is_enabled", True) and int(sku.get("stock") or 0) > 0:
+            return sku
+    return None
+
+
+def _build_guide_recommendations(
+    products: list[dict[str, Any]],
+    limit: int,
+    rag_context: str | None,
+) -> list[GuideRecommendationState]:
+    recommendations: list[GuideRecommendationState] = []
+    for product in products[:limit]:
+        sku = _first_in_stock_sku(product)
+        if sku is None:
+            continue
+        recommendations.append(
+            {
+                "product_id": int(product["id"]),
+                "sku_id": int(sku["id"]),
+                "rank": len(recommendations) + 1,
+                "reason": "Matched the current pet profile and the user's shopping request.",
+                "caution": "Check ingredients, size, and transition gradually when changing food.",
+                "source": "rag_enhanced" if rag_context else "product_search",
+            }
+        )
+    return recommendations
+
+
+def _build_pet_summary_text(pet_summary: dict[str, Any] | None) -> str:
+    if not pet_summary:
+        return "No pet profile was selected."
+    fields = [
+        f"name={pet_summary.get('name')}",
+        f"type={pet_summary.get('pet_type')}",
+        f"breed={pet_summary.get('breed')}",
+        f"weight={pet_summary.get('weight')}",
+        f"allergy={pet_summary.get('allergy_notes')}",
+        f"diet={pet_summary.get('diet_preference')}",
+        f"product={pet_summary.get('product_preference')}",
+    ]
+    return "; ".join(item for item in fields if not item.endswith("=None"))
+
+
+def _build_products_text(products: list[dict[str, Any]]) -> str:
+    lines = []
+    for product in products[:10]:
+        sku = _first_in_stock_sku(product)
+        sku_text = f", sku_id={sku.get('id')}" if sku else ""
+        lines.append(
+            f"product_id={product.get('id')}, title={product.get('title')}, "
+            f"price={product.get('price')}, stock={product.get('stock')}{sku_text}"
+        )
+    return "\n".join(lines)
+
+
+async def _call_deepseek_guide(
+    question: str,
+    risk_level: str,
+    pet_summary: dict[str, Any] | None,
+    products: list[dict[str, Any]],
+    history: list[dict[str, str]] | None,
+    rag_context: str | None,
+) -> str | None:
+    settings = get_settings()
+    if settings.llm_provider != "deepseek" or not settings.llm_api_key or not products:
+        return None
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_deepseek import ChatDeepSeek
+    except ImportError:
+        return None
+
+    system_prompt = (
+        "You are a pet mall shopping guide. Answer in concise Chinese. "
+        "Only recommend products from the provided candidate list. "
+        "Do not invent product IDs, SKUs, prices, stock, promotions, brands, or medical conclusions. "
+        "Prices and stock are database facts. "
+        "For medical, medication, prescription diet, or emergency questions, add a veterinarian safety warning."
+    )
+    user_prompt = (
+        f"Risk level: {risk_level}\n"
+        f"Pet profile: {_build_pet_summary_text(pet_summary)}\n"
+        f"Candidate products:\n{_build_products_text(products)}\n"
+        f"RAG context:\n{rag_context or ''}\n"
+        f"Recent history:\n{_normalize_history(history)}\n"
+        f"User question: {question}"
+    )
+    llm = ChatDeepSeek(
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        temperature=settings.llm_temperature,
+    )
+    response = await llm.ainvoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+    )
+    content = getattr(response, "content", None)
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    return None
+
+
+def build_rule_based_guide_answer(
+    risk_level: str,
+    products: list[dict[str, Any]],
+    pet_summary: dict[str, Any] | None,
+) -> str:
+    if not products:
+        answer = "No matching on-sale products are available right now. Please refine the need or try another category."
+    else:
+        pet_part = ""
+        if pet_summary:
+            pet_name = pet_summary.get("name")
+            pet_type = pet_summary.get("pet_type")
+            pet_part = f" for {pet_name or 'the selected pet'} ({pet_type or 'pet'})"
+        titles = ", ".join(str(product.get("title")) for product in products[:3] if product.get("title"))
+        answer = f"Based on the current pet profile{pet_part}, the available product candidates are: {titles}."
+    if risk_level == "high":
+        return f"{answer}\n\n{GUIDE_HIGH_RISK_TEXT} {GUIDE_MEDICAL_SAFETY_TEXT}"
+    if risk_level == "medical":
+        return f"{answer}\n\n{GUIDE_MEDICAL_SAFETY_TEXT}"
+    return answer
+
+
+def _enforce_guide_safety(answer: str, risk_level: str) -> str:
+    result = answer.strip()
+    if risk_level in {"medical", "high"} and "cannot replace a veterinarian diagnosis" not in result:
+        result = f"{result}\n\n{GUIDE_MEDICAL_SAFETY_TEXT}"
+    if risk_level == "high" and "offline veterinarian" not in result:
+        result = f"{result}\n\n{GUIDE_HIGH_RISK_TEXT}"
+    return result
+
+
+async def run_guide_agent_workflow(
+    *,
+    question: str,
+    risk_level: str,
+    pet_summary: dict[str, Any] | None = None,
+    products: list[dict[str, Any]] | None = None,
+    rag_context: str | None = None,
+    history: list[dict[str, str]] | None = None,
+    session_id: int | None = None,
+) -> GuideWorkflowState:
+    product_candidates = products or []
+    try:
+        answer = await _call_deepseek_guide(
+            question,
+            risk_level,
+            pet_summary,
+            product_candidates,
+            history,
+            rag_context,
+        )
+    except Exception:
+        answer = None
+    if answer is None:
+        answer = build_rule_based_guide_answer(risk_level, product_candidates, pet_summary)
+    return {
+        "question": question,
+        "risk_level": risk_level,
+        "history": history or [],
+        "rag_context": rag_context or "",
+        "pet_summary": pet_summary,
+        "products": product_candidates,
+        "answer": _enforce_guide_safety(answer, risk_level),
+        "recommendations": _build_guide_recommendations(
+            product_candidates,
+            len(product_candidates),
+            rag_context,
+        ),
+        "references": _build_references(rag_context),
+    }
