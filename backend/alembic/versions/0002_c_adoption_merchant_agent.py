@@ -1,6 +1,6 @@
 """create adoption merchant admin agent tables
 
-Revision ID: 0002_c_adoption_merchant_admin_agent
+Revision ID: 0002_c_adoption_merchant_agent
 Revises: 0001_user_auth_profile_address
 Create Date: 2026-07-05
 """
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0002_c_adoption_merchant_admin_agent"
+revision: str = "0002_c_adoption_merchant_agent"
 down_revision: str | None = "0001_user_auth_profile_address"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
