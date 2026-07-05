@@ -2,13 +2,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from routers import adoption_router, admin_router, agent_router, auth_router, merchant_router, user_router
 from routers import (
+    adoption_router,
+    admin_router,
+    agent_router,
     auth_router,
     cart_router,
     coin_router,
     community_router,
     knowledge_router,
+    merchant_router,
     order_router,
     payment_router,
     pet_router,

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from core.auth import hash_password
 from core.agent_workflow import run_qa_agent_workflow
 from models.audit import AdminActionLog, AuditLog
+from models.product import ProductCategory, ProductStatus
 from models.user import User
 from tests.test_auth_user_address import auth_headers, login_user, register_user
 
@@ -157,15 +158,76 @@ async def test_merchant_apply_and_admin_approve_sets_user_merchant(test_context,
     assert me.json()["is_merchant"] is True
 
     products = await client.get("/merchants/me/products", headers=auth_headers(merchant_token))
-    assert products.status_code == 501
-    assert products.json()["detail"]["message"] == "Product module not ready"
+    assert products.status_code == 200
+    assert products.json() == []
+
+    async with session_factory() as session:
+        category = ProductCategory(name="Merchant Food", sort_order=1)
+        session.add(category)
+        await session.commit()
+        await session.refresh(category)
+        category_id = category.id
+
+    created_product = await client.post(
+        "/merchants/me/products",
+        headers=auth_headers(merchant_token),
+        json={
+            "category_id": category_id,
+            "title": "Sang Cat Food",
+            "description": "merchant product",
+            "applicable_pet_type": "cat",
+            "skus": [
+                {
+                    "sku_code": "SANG-CAT-FOOD-1",
+                    "name": "1kg",
+                    "specs": {"weight": "1kg"},
+                    "price": 1000,
+                    "original_price": 1200,
+                    "stock": 10,
+                }
+            ],
+            "images": [{"image_url": "/generated/product/sang-cat-food.png"}],
+        },
+    )
+    assert created_product.status_code == 200, created_product.text
+    product = created_product.json()["product"]
+    product_id = product["id"]
+    sku_id = product["skus"][0]["id"]
+    assert product["status"] == ProductStatus.DRAFT.value
+
+    submitted = await client.post(
+        f"/merchants/me/products/{product_id}/submit",
+        headers=auth_headers(merchant_token),
+        json={"reason": "ready"},
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == ProductStatus.PENDING.value
+
+    pending_products = await client.get("/admin/products/pending", headers=auth_headers(admin_token))
+    assert pending_products.status_code == 200
+    assert pending_products.json()["total"] == 1
+
+    approved_product = await client.post(
+        f"/admin/products/{product_id}/approve",
+        headers=auth_headers(admin_token),
+        json={"reason": "ok"},
+    )
+    assert approved_product.status_code == 200, approved_product.text
+
+    off_sale = await client.post(
+        f"/merchants/me/products/{product_id}/off-sale",
+        headers=auth_headers(merchant_token),
+        json={"reason": "pause"},
+    )
+    assert off_sale.status_code == 200, off_sale.text
+    assert off_sale.json()["status"] == ProductStatus.OFF_SHELF.value
 
     discount = await client.post(
-        f"/merchants/me/products/{merchant_id}/discount",
+        f"/merchants/me/products/{product_id}/discount",
         headers=auth_headers(merchant_token),
-        json={"discount_rate": 0.85, "reason": "promotion"},
+        json={"sku_prices": {str(sku_id): 900}, "reason": "promotion"},
     )
-    assert discount.status_code == 501
+    assert discount.status_code == 200, discount.text
 
 
 async def test_admin_freeze_user_invalidates_token_and_logs_action(test_context, strong_password):
