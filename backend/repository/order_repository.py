@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from models.order import Order, OrderItem, PaymentTransaction
+from models.order import Order, OrderItem, OrderRewardDelivery, PaymentTransaction
 from models.product import CartItem, Product, ProductSku
 
 
@@ -58,6 +58,17 @@ async def get_order_item(db: AsyncSession, item_id: int) -> OrderItem | None:
         select(OrderItem).options(selectinload(OrderItem.order)).where(OrderItem.id == item_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_order_reward_delivery(
+    db: AsyncSession, order_id: int, lock: bool = False
+) -> OrderRewardDelivery | None:
+    statement = select(OrderRewardDelivery).where(
+        OrderRewardDelivery.order_id == order_id
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return (await db.execute(statement)).scalar_one_or_none()
 
 
 async def get_payment_by_business(db: AsyncSession, order_id: int, lock: bool = False) -> PaymentTransaction | None:

@@ -5,10 +5,16 @@ import json
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from models.order import Order, OrderStatus
+from core.errors import AppException
+from models.order import Order, OrderRewardDelivery, OrderStatus
 from models.product import Product, ProductCategory, ProductSku
 from main import app
-from services.order_service import get_coin_reward_adapter, transition_fulfillment
+from services.coin_service import RealCoinRewardAdapter
+from services.order_service import (
+    DeferredCoinRewardAdapter,
+    get_coin_reward_adapter,
+    transition_fulfillment,
+)
 from services.payment_service import _extract_signed_response
 from settings.config import get_settings
 
@@ -17,13 +23,27 @@ pytestmark = pytest.mark.asyncio
 
 
 class FakeRewardAdapter:
-    def __init__(self):
+    def __init__(self, failures_before_success: int = 0):
         self.keys: list[str] = []
+        self.failures_before_success = failures_before_success
 
     async def grant_order_reward(
         self, *, user_id: int, order_id: int, pay_amount: int, idempotency_key: str
     ) -> None:
         self.keys.append(idempotency_key)
+        if len(self.keys) <= self.failures_before_success:
+            raise RuntimeError("temporary reward failure")
+
+
+async def test_reward_adapter_defaults_are_not_silent_placeholders():
+    assert isinstance(get_coin_reward_adapter(), RealCoinRewardAdapter)
+    with pytest.raises(AppException, match="Coin reward integration is unavailable"):
+        await DeferredCoinRewardAdapter().grant_order_reward(
+            user_id=1,
+            order_id=1,
+            pay_amount=100,
+            idempotency_key="order:1:receipt_reward",
+        )
 
 
 async def test_alipay_query_response_signature():
@@ -134,13 +154,26 @@ async def test_cross_merchant_order_mock_payment_and_cancel(test_context, strong
         await transition_fulfillment(db, order_id, OrderStatus.PENDING_SHIPMENT.value)
         await transition_fulfillment(db, order_id, OrderStatus.SHIPPED.value)
         await transition_fulfillment(db, order_id, OrderStatus.PENDING_RECEIPT.value)
-    rewards = FakeRewardAdapter()
+    rewards = FakeRewardAdapter(failures_before_success=3)
     app.dependency_overrides[get_coin_reward_adapter] = lambda: rewards
     completed = await client.post(f"/orders/{order_id}/confirm-receipt", headers=auth(token))
     assert completed.json()["status"] == "completed"
+    assert rewards.keys == [f"order:{order_id}:receipt_reward"] * 3
+    async with test_context["session_factory"]() as db:
+        delivery = await db.get(OrderRewardDelivery, 1)
+        assert delivery.order_id == order_id
+        assert delivery.status == "failed"
+        assert delivery.error_message == "temporary reward failure"
+
+    retried = await client.post(f"/orders/{order_id}/confirm-receipt", headers=auth(token))
+    assert retried.json()["status"] == "completed"
     duplicate = await client.post(f"/orders/{order_id}/confirm-receipt", headers=auth(token))
     assert duplicate.status_code == 409
-    assert rewards.keys == [f"order:{order_id}:receipt_reward"]
+    assert rewards.keys == [f"order:{order_id}:receipt_reward"] * 4
+    async with test_context["session_factory"]() as db:
+        delivery = await db.get(OrderRewardDelivery, 1)
+        assert delivery.status == "delivered"
+        assert delivery.error_message is None
     invalid_notify = await client.post("/payments/alipay/notify", data={"sign": "invalid"})
     assert invalid_notify.status_code == 400
 
