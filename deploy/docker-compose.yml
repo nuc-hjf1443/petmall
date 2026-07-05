@@ -12,6 +12,7 @@ services:
     depends_on:
       - mysql
       - redis
+      - rabbitmq
 
   mysql:
     image: mysql:8.4
@@ -27,6 +28,25 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "workers.knowledge_worker"]
+    env_file:
+      - ../backend/.env
+    volumes:
+      - ../backend/generated:/app/generated
+    depends_on:
+      - mysql
+      - rabbitmq
 
 volumes:
   mysql_data:

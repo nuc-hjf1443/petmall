@@ -1,11 +1,116 @@
-# Test your FastAPI endpoints
+# PetMall backend HTTP examples
 
-GET http://127.0.0.1:8000/
+@baseUrl = http://127.0.0.1:8000
+@token = REPLACE_WITH_USER_ACCESS_TOKEN
+@productId = 1
+@skuId = 1
+@cartItemId = 1
+
+GET {{baseUrl}}/
 Accept: application/json
 
 ###
 
-GET http://127.0.0.1:8000/hello/User
+GET {{baseUrl}}/categories
 Accept: application/json
 
 ###
+
+GET {{baseUrl}}/products?page=1&page_size=20&keyword=cat&pet_type=cat
+Accept: application/json
+
+###
+
+GET {{baseUrl}}/products/{{productId}}
+Accept: application/json
+
+###
+
+GET {{baseUrl}}/products/{{productId}}/reviews?page=1&page_size=20
+Accept: application/json
+
+###
+
+# 仅已完成订单的订单明细可以评价。
+POST {{baseUrl}}/products/{{productId}}/reviews
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "order_item_id": 1,
+  "rating": 5,
+  "content": "The product works well for my pet.",
+  "is_anonymous": false
+}
+
+###
+
+GET {{baseUrl}}/cart/items
+Authorization: Bearer {{token}}
+Accept: application/json
+
+###
+
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "sku_id": {{skuId}},
+  "quantity": 1
+}
+
+###
+
+PUT {{baseUrl}}/cart/items/{{cartItemId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "quantity": 2,
+  "selected": true
+}
+
+###
+
+DELETE {{baseUrl}}/cart/items/{{cartItemId}}
+Authorization: Bearer {{token}}
+Accept: application/json
+
+###
+
+POST {{baseUrl}}/orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "address_id": 1,
+  "cart_item_ids": [{{cartItemId}}]
+}
+
+###
+
+POST {{baseUrl}}/payments/orders/1/pay
+Authorization: Bearer {{token}}
+
+###
+
+POST {{baseUrl}}/posts
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=PetMallBoundary
+
+--PetMallBoundary
+Content-Disposition: form-data; name="content"
+
+My pet's daily life
+--PetMallBoundary--
+
+###
+
+POST {{baseUrl}}/knowledge-bases
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "My pet knowledge"
+}

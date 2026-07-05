@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
 
     generated_asset_dir: str = "generated"
-    vector_store_dir: str = "generated/vector_store"
+    vector_store_dir: str = "generated/private/vector_store"
     max_upload_size_mb: int = 20
 
     llm_provider: str = "deepseek"
@@ -45,6 +45,20 @@ class Settings(BaseSettings):
 
     payment_mode: str = "mock"
     mock_payment_enabled: bool = True
+    alipay_gateway_url: str = "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
+    alipay_app_id: str = ""
+    alipay_private_key: str = ""
+    alipay_public_key: str = ""
+    alipay_seller_id: str = ""
+    alipay_notify_url: str = "http://127.0.0.1:8000/payments/alipay/notify"
+    alipay_return_url: str = "http://127.0.0.1:8000/payments/alipay/return"
+
+    rag_chunk_size: int = 800
+    rag_chunk_overlap: int = 100
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_embed_model: str = "nomic-embed-text"
+    chroma_collection: str = "petmall_knowledge"
+    knowledge_task_lease_seconds: int = 900
 
     spug_sms_base_url: str = "https://push.spug.cc"
     spug_sms_template_id: str = ""
@@ -62,6 +76,21 @@ class Settings(BaseSettings):
     @property
     def generated_asset_path(self) -> Path:
         path = Path(self.generated_asset_dir)
+        if path.is_absolute():
+            return path
+        return BASE_DIR / path
+
+    @property
+    def public_asset_path(self) -> Path:
+        return self.generated_asset_path / "public"
+
+    @property
+    def private_asset_path(self) -> Path:
+        return self.generated_asset_path / "private"
+
+    @property
+    def vector_store_path(self) -> Path:
+        path = Path(self.vector_store_dir)
         if path.is_absolute():
             return path
         return BASE_DIR / path

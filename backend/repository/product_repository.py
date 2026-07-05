@@ -1,0 +1,253 @@
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from models.product import (
+    Product,
+    ProductCategory,
+    ProductReview,
+    ProductSku,
+    ProductStatus,
+)
+
+
+async def list_enabled_categories(db: AsyncSession) -> list[ProductCategory]:
+    result = await db.execute(
+        select(ProductCategory)
+        .where(ProductCategory.is_enabled.is_(True))
+        .order_by(ProductCategory.sort_order, ProductCategory.id)
+    )
+    return list(result.scalars().all())
+
+
+async def list_public_products(
+    db: AsyncSession,
+    *,
+    keyword: str | None,
+    category_id: int | None,
+    pet_type: str | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[Product], int]:
+    filters = [
+        Product.status == ProductStatus.ON_SALE.value,
+        ProductCategory.is_enabled.is_(True),
+    ]
+    if keyword:
+        pattern = f"%{keyword.strip()}%"
+        filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
+    if category_id is not None:
+        filters.append(Product.category_id == category_id)
+    if pet_type:
+        filters.append(Product.applicable_pet_type == pet_type.strip())
+
+    total = await db.scalar(
+        select(func.count(Product.id))
+        .join(ProductCategory, ProductCategory.id == Product.category_id)
+        .where(*filters)
+    )
+    result = await db.execute(
+        select(Product)
+        .join(ProductCategory, ProductCategory.id == Product.category_id)
+        .where(*filters)
+        .order_by(Product.updated_at.desc(), Product.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return list(result.scalars().all()), int(total or 0)
+
+
+async def get_product_by_id(db: AsyncSession, product_id: int) -> Product | None:
+    result = await db.execute(
+        select(Product)
+        .options(
+            selectinload(Product.category),
+            selectinload(Product.skus),
+            selectinload(Product.images),
+        )
+        .where(Product.id == product_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_public_product_by_id(db: AsyncSession, product_id: int) -> Product | None:
+    result = await db.execute(
+        select(Product)
+        .join(ProductCategory, ProductCategory.id == Product.category_id)
+        .options(
+            selectinload(Product.category),
+            selectinload(Product.skus),
+            selectinload(Product.images),
+        )
+        .where(
+            Product.id == product_id,
+            Product.status == ProductStatus.ON_SALE.value,
+            ProductCategory.is_enabled.is_(True),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_sku_with_product(db: AsyncSession, sku_id: int) -> ProductSku | None:
+    result = await db.execute(
+        select(ProductSku)
+        .options(
+            selectinload(ProductSku.product).selectinload(Product.category),
+        )
+        .where(ProductSku.id == sku_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_products_by_merchant(
+    db: AsyncSession,
+    merchant_id: int,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+) -> list[Product]:
+    result = await db.execute(
+        select(Product)
+        .where(Product.merchant_id == merchant_id)
+        .order_by(Product.updated_at.desc(), Product.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_products_by_status(
+    db: AsyncSession,
+    status: str,
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[Product], int]:
+    total = int(
+        (await db.scalar(select(func.count(Product.id)).where(Product.status == status))) or 0
+    )
+    result = await db.execute(
+        select(Product)
+        .options(
+            selectinload(Product.category),
+            selectinload(Product.skus),
+            selectinload(Product.images),
+        )
+        .where(Product.status == status)
+        .order_by(Product.submitted_at, Product.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return list(result.scalars().unique().all()), total
+
+
+async def get_category_by_id(
+    db: AsyncSession,
+    category_id: int,
+) -> ProductCategory | None:
+    return await db.get(ProductCategory, category_id)
+
+
+async def get_product_for_update(
+    db: AsyncSession,
+    product_id: int,
+) -> Product | None:
+    result = await db.execute(
+        select(Product)
+        .options(
+            selectinload(Product.category),
+            selectinload(Product.skus),
+            selectinload(Product.images),
+        )
+        .where(Product.id == product_id)
+        .with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_sku_by_code(
+    db: AsyncSession,
+    sku_code: str,
+) -> ProductSku | None:
+    result = await db.execute(
+        select(ProductSku).where(ProductSku.sku_code == sku_code)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_product_review_by_order_item(
+    db: AsyncSession,
+    order_item_id: int,
+) -> ProductReview | None:
+    result = await db.execute(
+        select(ProductReview).where(ProductReview.order_item_id == order_item_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_product_reviews(
+    db: AsyncSession,
+    product_id: int,
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[ProductReview], int, float | None]:
+    filters = [
+        ProductReview.product_id == product_id,
+        ProductReview.is_deleted.is_(False),
+    ]
+    summary = (
+        await db.execute(
+            select(
+                func.count(ProductReview.id),
+                func.avg(ProductReview.rating),
+            ).where(*filters)
+        )
+    ).one()
+    result = await db.execute(
+        select(ProductReview)
+        .options(selectinload(ProductReview.sku))
+        .where(*filters)
+        .order_by(ProductReview.created_at.desc(), ProductReview.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    average = float(summary[1]) if summary[1] is not None else None
+    return list(result.scalars().all()), int(summary[0] or 0), average
+
+
+async def search_sale_products(
+    db: AsyncSession,
+    query: str,
+    pet_type: str | None,
+    limit: int,
+) -> list[Product]:
+    filters = [
+        Product.status == ProductStatus.ON_SALE.value,
+        ProductCategory.is_enabled.is_(True),
+        Product.stock > 0,
+    ]
+    if query.strip():
+        pattern = f"%{query.strip()}%"
+        filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
+    if pet_type:
+        filters.append(Product.applicable_pet_type == pet_type.strip())
+    result = await db.execute(
+        select(Product)
+        .join(ProductCategory, ProductCategory.id == Product.category_id)
+        .join(ProductSku, ProductSku.product_id == Product.id)
+        .options(
+            selectinload(Product.category),
+            selectinload(Product.skus),
+            selectinload(Product.images),
+        )
+        .where(
+            *filters,
+            ProductSku.is_enabled.is_(True),
+            ProductSku.stock > 0,
+        )
+        .distinct()
+        .order_by(Product.updated_at.desc(), Product.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())

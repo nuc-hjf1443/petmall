@@ -2,7 +2,8 @@
 
 这是一个从 0 开始搭建的宠物综合服务平台初始项目架子，目标是为后续团队协作开发提供统一的前后端目录、文档、部署模板和基础依赖。
 
-当前阶段只完成工程骨架，不代表业务功能已经实现。
+当前后端已完成用户基础能力，以及 B 同学负责的商品、购物车、订单支付、
+社区和私人知识库/RAG 基础闭环；其他人员负责的宠物档案、Agent、领养和后台仍在开发。
 
 ## 产品定位
 
@@ -70,6 +71,16 @@ python -m uvicorn main:app --reload
 
 完整 Agent/RAG 能力还需要准备 MySQL、Redis、RabbitMQ、Ollama、DeepSeek API。启用 LangGraph 多轮记忆时，还需要 PostgreSQL。
 
+知识库 worker 独立启动：
+
+```powershell
+cd backend
+python -m workers.knowledge_worker
+```
+
+订单支付通过 `PETMALL_PAYMENT_MODE=mock|alipay_sandbox` 切换。支付宝沙箱模式必须配置
+应用 ID、RSA2 私钥、支付宝公钥、通知地址和回跳地址；真实密钥只允许放入本地 `.env`。
+
 ## 前端本地启动
 
 使用 HBuilderX 打开 `frontend/` 目录，运行到 Chrome、Android 或小程序开发工具。
@@ -105,22 +116,22 @@ Copy-Item backend\.env.example backend\.env
 - 前后端目录边界
 - 后端基础包目录
 - 本地生成文件目录占位
-- Alembic 迁移目录占位
+- Alembic `0001`—`0005` 迁移
 - 部署模板
 - 基础依赖清单
 - 开发设计文档
+- 用户鉴权、地址、商品、SKU、评价和购物车
+- 跨商家拆单、库存事务、mock/支付宝沙箱支付
+- 社区动态、媒体、互动、关注和举报服务
+- 私人知识库上传、RabbitMQ worker、Ollama/ChromaDB 检索
 - README、AGENTS 和环境变量模板
 
 待完成：
 
-- 后端配置加载
-- 数据库连接和 Alembic 正式初始化
-- 用户注册、登录、JWT
 - 管理员初始化脚本
-- 宠物档案、宠物详细资料、商城、订单、社区、领养等业务模块
+- 宠物档案、宠物详细资料、领养等业务模块
 - AI 导购 Agent、养宠知识问答 Agent
-- 私人知识库、资料文件生成、RAG 检索
-- 支付宝沙箱和本地 mock 双模式支付
+- A 同学宠物资料生成、返币适配器真实接入
 - 前端业务页面
 
 ## 开发顺序
