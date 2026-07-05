@@ -1,4 +1,77 @@
 from models.base import Base
+from models.product import (
+    CartItem,
+    Product,
+    ProductCategory,
+    ProductImage,
+    ProductReview,
+    ProductSku,
+    ProductStatus,
+)
 from models.user import User, UserAddress, UserProfile
+from models.order import (
+    AfterSale,
+    Order,
+    OrderItem,
+    OrderRewardDelivery,
+    OrderStatus,
+    PaymentStatus,
+    PaymentTransaction,
+)
+from models.community import (
+    Follow,
+    Post,
+    PostComment,
+    PostFavorite,
+    PostLike,
+    PostMedia,
+    PostStatus,
+    PostTopic,
+    Report,
+    Topic,
+)
+from models.knowledge import (
+    DocumentStatus,
+    KnowledgeBase,
+    KnowledgeChunk,
+    KnowledgeDocument,
+    KnowledgeTask,
+    RagRetrievalLog,
+)
 
-__all__ = ["Base", "User", "UserAddress", "UserProfile"]
+__all__ = [
+    "Base",
+    "CartItem",
+    "Product",
+    "ProductCategory",
+    "ProductImage",
+    "ProductReview",
+    "ProductSku",
+    "ProductStatus",
+    "User",
+    "UserAddress",
+    "UserProfile",
+    "Order",
+    "OrderItem",
+    "OrderStatus",
+    "PaymentTransaction",
+    "PaymentStatus",
+    "AfterSale",
+    "OrderRewardDelivery",
+    "Post",
+    "PostStatus",
+    "PostMedia",
+    "PostComment",
+    "PostLike",
+    "PostFavorite",
+    "Topic",
+    "PostTopic",
+    "Follow",
+    "Report",
+    "KnowledgeBase",
+    "KnowledgeDocument",
+    "KnowledgeChunk",
+    "KnowledgeTask",
+    "RagRetrievalLog",
+    "DocumentStatus",
+]
