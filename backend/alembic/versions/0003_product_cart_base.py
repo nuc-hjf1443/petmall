@@ -1,7 +1,7 @@
 """create product category sku and cart tables
 
 Revision ID: 0003_product_cart_base
-Revises: 0002_c_adoption_merchant_admin_agent
+Revises: 0002_c_adoption_merchant_agent
 Create Date: 2026-07-05
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "0003_product_cart_base"
-down_revision: str | None = "0002_c_adoption_merchant_admin_agent"
+down_revision: str | None = "0002_c_adoption_merchant_agent"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
