@@ -28,8 +28,17 @@ IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 VIDEO_TYPES = {"video/mp4": ".mp4"}
 
 
-async def _post_response(db: AsyncSession, post: Post) -> PostResponse:
+async def _post_response(db: AsyncSession, post: Post, current_user_id: int | None = None) -> PostResponse:
     likes, favorites, comments = await interaction_counts(db, post.id)
+    liked_by_me = False
+    favorited_by_me = False
+    following_author = False
+    can_delete = False
+    if current_user_id is not None:
+        liked_by_me = await get_interaction(db, PostLike, current_user_id, post.id) is not None
+        favorited_by_me = await get_interaction(db, PostFavorite, current_user_id, post.id) is not None
+        following_author = await get_follow(db, current_user_id, post.user_id) is not None
+        can_delete = current_user_id == post.user_id
     return PostResponse(
         id=post.id,
         user_id=post.user_id,
@@ -43,6 +52,10 @@ async def _post_response(db: AsyncSession, post: Post) -> PostResponse:
         like_count=likes,
         favorite_count=favorites,
         comment_count=comments,
+        liked_by_me=liked_by_me,
+        favorited_by_me=favorited_by_me,
+        following_author=following_author,
+        can_delete=can_delete,
         created_at=post.created_at,
     )
 
@@ -106,7 +119,7 @@ async def create_post(
         db.add(post)
         await db.commit()
         await db.refresh(post)
-        return await _post_response(db, post)
+        return await _post_response(db, post, user_id)
     except Exception:
         await db.rollback()
         for path in saved_paths:
@@ -114,15 +127,15 @@ async def create_post(
         raise
 
 
-async def get_posts(db: AsyncSession, page: int, page_size: int) -> list[PostResponse]:
-    return [await _post_response(db, post) for post in await list_visible_posts(db, page, page_size)]
+async def get_posts(db: AsyncSession, page: int, page_size: int, current_user_id: int | None = None) -> list[PostResponse]:
+    return [await _post_response(db, post, current_user_id) for post in await list_visible_posts(db, page, page_size)]
 
 
-async def get_post(db: AsyncSession, post_id: int) -> PostResponse:
+async def get_post(db: AsyncSession, post_id: int, current_user_id: int | None = None) -> PostResponse:
     post = await get_visible_post(db, post_id)
     if post is None:
         raise not_found("Post not found")
-    return await _post_response(db, post)
+    return await _post_response(db, post, current_user_id)
 
 
 async def delete_post(db: AsyncSession, user_id: int, post_id: int) -> None:

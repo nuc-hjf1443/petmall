@@ -27,6 +27,10 @@ class PostResponse(BaseModel):
     like_count: int
     favorite_count: int
     comment_count: int
+    liked_by_me: bool = False
+    favorited_by_me: bool = False
+    following_author: bool = False
+    can_delete: bool = False
     created_at: datetime
 
 

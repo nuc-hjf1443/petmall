@@ -1,11 +1,33 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import get_db, require_admin
 from models.user import User
-from schemas.admin_schema import AdminLoginResponse, AdminReasonRequest, AdminReportResolveRequest, AdminUserResponse
+from schemas.admin_schema import (
+    AdminLoginResponse,
+    AdminOrderListResponse,
+    AdminOrderResponse,
+    AdminOrderTrendResponse,
+    AdminOverviewResponse,
+    AdminPetListResponse,
+    AdminReasonRequest,
+    AdminReportResolveRequest,
+    AdminUserResponse,
+)
 from schemas.auth_schema import LoginRequest
-from services.admin_service import admin_login, list_users, set_user_frozen
+from services.admin_service import (
+    admin_login,
+    force_cancel_order,
+    get_admin_order,
+    get_admin_order_trend,
+    get_admin_overview,
+    list_admin_orders,
+    list_admin_pets,
+    list_users,
+    set_user_frozen,
+)
 from services.audit_service import write_audit_log
 from services.community_service import list_reports, resolve_report
 from services.product_service import get_pending_products_for_audit, update_product_audit_status
@@ -50,6 +72,90 @@ async def unfreeze_user(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     return await set_user_frozen(db, admin, user_id, False, payload.reason)
+
+
+@router.get("/pets", response_model=AdminPetListResponse)
+async def admin_pets(
+    page: int = 1,
+    page_size: int = 20,
+    user_id: int | None = None,
+    pet_type: str | None = None,
+    keyword: str | None = None,
+    is_deleted: bool | None = None,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminPetListResponse:
+    return await list_admin_pets(
+        db,
+        page=page,
+        page_size=page_size,
+        user_id=user_id,
+        pet_type=pet_type,
+        keyword=keyword,
+        is_deleted=is_deleted,
+    )
+
+
+@router.get("/orders", response_model=AdminOrderListResponse)
+async def admin_orders(
+    page: int = 1,
+    page_size: int = 20,
+    status: str | None = None,
+    user_id: int | None = None,
+    merchant_id: int | None = None,
+    order_no: str | None = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminOrderListResponse:
+    return await list_admin_orders(
+        db,
+        page=page,
+        page_size=page_size,
+        status=status,
+        user_id=user_id,
+        merchant_id=merchant_id,
+        order_no=order_no,
+        created_from=created_from,
+        created_to=created_to,
+    )
+
+
+@router.get("/orders/{order_id}", response_model=AdminOrderResponse)
+async def admin_order_detail(
+    order_id: int,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminOrderResponse:
+    return await get_admin_order(db, order_id)
+
+
+@router.post("/orders/{order_id}/force-cancel", response_model=AdminOrderResponse)
+async def admin_force_cancel_order(
+    order_id: int,
+    payload: AdminReasonRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminOrderResponse:
+    return await force_cancel_order(db, admin, order_id, payload.reason)
+
+
+@router.get("/statistics/overview", response_model=AdminOverviewResponse)
+async def admin_statistics_overview(
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminOverviewResponse:
+    return await get_admin_overview(db)
+
+
+@router.get("/statistics/orders-trend", response_model=AdminOrderTrendResponse)
+async def admin_orders_trend(
+    days: int = 30,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminOrderTrendResponse:
+    return await get_admin_order_trend(db, days=days)
 
 
 @router.get("/products/pending")
@@ -114,6 +220,33 @@ async def reject_product(
     )
     await db.commit()
     return {"message": "Product rejected"}
+
+
+@router.post("/products/{product_id}/off-sale")
+async def admin_off_sale_product(
+    product_id: int,
+    payload: AdminReasonRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    await update_product_audit_status(
+        db,
+        product_id,
+        ProductStatus.OFF_SHELF.value,
+        payload.reason,
+        commit=False,
+    )
+    await write_audit_log(
+        db,
+        target_type="product",
+        target_id=product_id,
+        action="off_sale",
+        result=ProductStatus.OFF_SHELF.value,
+        operator_id=admin.id,
+        reason=payload.reason,
+    )
+    await db.commit()
+    return {"message": "Product off sale"}
 
 
 @router.get("/reports")

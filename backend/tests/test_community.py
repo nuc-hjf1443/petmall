@@ -25,6 +25,8 @@ async def test_post_media_interactions_and_permissions(test_context, strong_pass
         )
         assert post.status_code == 200, post.text
         post_id = post.json()["id"]
+        author_id = post.json()["user_id"]
+        assert post.json()["can_delete"] is True
         media_url = post.json()["media"][0]["file_url"]
         assert ".." not in media_url
         media_path = settings.public_asset_path / Path(
@@ -34,13 +36,30 @@ async def test_post_media_interactions_and_permissions(test_context, strong_pass
 
         assert (await client.post(f"/posts/{post_id}/likes", headers=auth(token_b))).status_code == 200
         assert (await client.post(f"/posts/{post_id}/likes", headers=auth(token_b))).status_code == 200
-        detail = await client.get(f"/posts/{post_id}")
-        assert detail.json()["like_count"] == 1
+        anonymous_detail = await client.get(f"/posts/{post_id}")
+        assert anonymous_detail.json()["like_count"] == 1
+        assert anonymous_detail.json()["liked_by_me"] is False
+        detail = await client.get(f"/posts/{post_id}", headers=auth(token_b))
+        assert detail.json()["liked_by_me"] is True
+        assert detail.json()["can_delete"] is False
         assert (await client.post(f"/posts/{post_id}/favorites", headers=auth(token_b))).status_code == 200
         assert (await client.post(f"/posts/{post_id}/favorites", headers=auth(token_b))).status_code == 200
-        assert (await client.get(f"/posts/{post_id}")).json()["favorite_count"] == 1
+        detail = await client.get(f"/posts/{post_id}", headers=auth(token_b))
+        assert detail.json()["favorite_count"] == 1
+        assert detail.json()["favorited_by_me"] is True
+        assert (await client.delete(f"/posts/{post_id}/likes", headers=auth(token_b))).status_code == 200
+        assert (await client.delete(f"/posts/{post_id}/favorites", headers=auth(token_b))).status_code == 200
+        detail = await client.get(f"/posts/{post_id}", headers=auth(token_b))
+        assert detail.json()["liked_by_me"] is False
+        assert detail.json()["favorited_by_me"] is False
         assert (await client.delete(f"/posts/{post_id}", headers=auth(token_b))).status_code == 403
         assert (await client.post("/users/2/follow", headers=auth(token_b))).status_code == 400
+        assert (await client.post(f"/users/{author_id}/follow", headers=auth(token_b))).status_code == 200
+        detail = await client.get(f"/posts/{post_id}", headers=auth(token_b))
+        assert detail.json()["following_author"] is True
+        assert (await client.delete(f"/users/{author_id}/follow", headers=auth(token_b))).status_code == 200
+        list_result = await client.get("/posts", headers=auth(token_b))
+        assert list_result.json()[0]["following_author"] is False
         report = await client.post(
             f"/posts/{post_id}/reports", headers=auth(token_b),
             json={"target_type": "post", "reason": "review this"},
