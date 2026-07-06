@@ -85,7 +85,19 @@ python -m workers.knowledge_worker
 
 使用 HBuilderX 打开 `frontend/` 目录，运行到 Chrome、Android 或小程序开发工具。
 
-当前前端也只是初始 uni-app 架子，业务页面需要后续开发。
+用户端采用一套 Vue 3 + uni-app 页面：小于 `900px` 使用手机单列布局和底部导航，
+桌面端使用顶部导航、居中容器和多栏布局。当前已提供首页、登录、商城、购物车、
+宠物档案、AI 问答、社区、领养和我的页面。
+
+H5 本地开发默认请求 `http://127.0.0.1:8000`。如需连接其他环境，在
+`frontend/` 下从 `.env.example` 创建本地 `.env`，设置：
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+生产 H5 未设置该变量时默认请求同域 `/api`，由 `deploy/nginx.conf` 反向代理。
+Android 真机不能通过 `127.0.0.1` 访问电脑，请将变量改为开发机局域网地址。
 
 ## 环境变量
 
@@ -132,7 +144,7 @@ Copy-Item backend\.env.example backend\.env
 - 宠物档案、宠物详细资料、领养等业务模块
 - AI 导购 Agent、养宠知识问答 Agent
 - A 同学宠物资料生成、返币适配器真实接入
-- 前端业务页面
+- 商品详情、确认订单、订单详情等二级页面的完整交互
 
 ## 开发顺序
 

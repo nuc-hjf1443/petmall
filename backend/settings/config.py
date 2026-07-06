@@ -74,6 +74,12 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
+    def cors_origin_regex(self) -> str | None:
+        if self.env.lower() in {"local", "development", "test"}:
+            return r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+        return None
+
+    @property
     def generated_asset_path(self) -> Path:
         path = Path(self.generated_asset_dir)
         if path.is_absolute():

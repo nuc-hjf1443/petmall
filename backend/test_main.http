@@ -1,8 +1,8 @@
 # PetMall backend HTTP examples
 
 @baseUrl = http://127.0.0.1:8000
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidG9rZW5fdmVyc2lvbiI6MSwidHlwZSI6ImFjY2VzcyIsImV4cCI6MTc4MzQwNjA0MH0.GzPw4wig6ZKeMHPlIYKuptDpS_6n--lnmv4n8_d-vLg
-@loginAccount = 13546532709
+@token =
+@loginAccount = 18834258159
 @loginPassword = 12345678
 @productId = 1
 @skuId = 1
