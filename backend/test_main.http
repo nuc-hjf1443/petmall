@@ -1,13 +1,25 @@
 # PetMall backend HTTP examples
 
 @baseUrl = http://127.0.0.1:8000
-@token = REPLACE_WITH_USER_ACCESS_TOKEN
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidG9rZW5fdmVyc2lvbiI6MSwidHlwZSI6ImFjY2VzcyIsImV4cCI6MTc4MzQwNjA0MH0.GzPw4wig6ZKeMHPlIYKuptDpS_6n--lnmv4n8_d-vLg
+@loginAccount = 13546532709
+@loginPassword = 12345678
 @productId = 1
 @skuId = 1
 @cartItemId = 1
 
 GET {{baseUrl}}/
 Accept: application/json
+
+###
+
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "account": "{{loginAccount}}",
+  "password": "{{loginPassword}}"
+}
 
 ###
 
