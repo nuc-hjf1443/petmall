@@ -5,7 +5,10 @@ from sqlalchemy import select
 from core.auth import hash_password
 from core.agent_workflow import run_qa_agent_workflow
 from models.audit import AdminActionLog, AuditLog
-from models.product import ProductCategory, ProductStatus
+from models.merchant import Merchant
+from models.order import Order, OrderItem, PaymentStatus, PaymentTransaction
+from models.pet import PetDetailProfile, PetProfile
+from models.product import Product, ProductCategory, ProductSku, ProductStatus
 from models.user import User
 from tests.test_auth_user_address import auth_headers, login_user, register_user
 
@@ -259,6 +262,256 @@ async def test_admin_freeze_user_invalidates_token_and_logs_action(test_context,
             )
         )
         assert result.scalar_one_or_none() is not None
+
+
+async def test_admin_platform_pets_orders_and_statistics(test_context, strong_password):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    session_factory = test_context["session_factory"]
+
+    user = await register_user(client, cache, "13800138106", strong_password)
+    user_token = await login_user(client, "13800138106", strong_password)
+    await create_admin(session_factory, strong_password)
+    admin_token = await login_user(client, "13800138999", strong_password)
+
+    async with session_factory() as session:
+        merchant = Merchant(
+            owner_user_id=user["id"],
+            shop_name="Admin View Shop",
+            contact_name="Sang",
+            contact_phone="13800138106",
+            business_scope="pet food",
+            status="approved",
+        )
+        pet = PetProfile(user_id=user["id"], name="Mimi", pet_type="cat", breed="British Shorthair")
+        session.add_all([merchant, pet])
+        await session.flush()
+        session.add(PetDetailProfile(user_id=user["id"], pet_id=pet.id, profile_completeness=80))
+        order = Order(
+            order_no="PMADMIN001",
+            user_id=user["id"],
+            merchant_id=merchant.id,
+            total_amount=1200,
+            discount_amount=100,
+            coin_deduct_amount=0,
+            pay_amount=1100,
+            status="paid",
+            address_snapshot={
+                "receiver_name": "Sang",
+                "receiver_phone": "13800138106",
+                "province": "Shanghai",
+                "city": "Shanghai",
+                "district": "Pudong",
+                "detail_address": "No.1 Road",
+            },
+        )
+        order.items.append(
+            OrderItem(
+                product_id=1,
+                sku_id=1,
+                product_title="Cat Food",
+                sku_name="1kg",
+                sku_specs={"weight": "1kg"},
+                product_image=None,
+                unit_price=1100,
+                quantity=1,
+                subtotal=1100,
+            )
+        )
+        session.add(order)
+        await session.flush()
+        session.add(
+            PaymentTransaction(
+                out_trade_no="TRADEADMIN001",
+                business_type="order",
+                business_id=order.id,
+                pay_channel="mock",
+                payment_mode="mock",
+                amount=1100,
+                status=PaymentStatus.PAID.value,
+            )
+        )
+        await session.commit()
+        order_id = order.id
+
+    forbidden = await client.get("/admin/pets", headers=auth_headers(user_token))
+    assert forbidden.status_code == 403
+
+    pets = await client.get("/admin/pets?keyword=Mimi", headers=auth_headers(admin_token))
+    assert pets.status_code == 200, pets.text
+    assert pets.json()["total"] == 1
+    assert pets.json()["items"][0]["owner_phone"] == "13800138106"
+    assert pets.json()["items"][0]["profile_completeness"] == 80
+
+    orders = await client.get("/admin/orders?order_no=PMADMIN001", headers=auth_headers(admin_token))
+    assert orders.status_code == 200, orders.text
+    assert orders.json()["total"] == 1
+    assert orders.json()["items"][0]["payment_status"] == PaymentStatus.PAID.value
+    assert orders.json()["items"][0]["items"][0]["product_title"] == "Cat Food"
+
+    order_detail = await client.get(f"/admin/orders/{order_id}", headers=auth_headers(admin_token))
+    assert order_detail.status_code == 200, order_detail.text
+    assert order_detail.json()["merchant_name"] == "Admin View Shop"
+
+    overview = await client.get("/admin/statistics/overview", headers=auth_headers(admin_token))
+    assert overview.status_code == 200, overview.text
+    assert overview.json()["gmv"] == 1100
+    assert overview.json()["paid_order_count"] == 1
+    assert overview.json()["pet_count"] == 1
+
+    trend = await client.get("/admin/statistics/orders-trend?days=7", headers=auth_headers(admin_token))
+    assert trend.status_code == 200, trend.text
+    assert sum(item["gmv"] for item in trend.json()["items"]) == 1100
+
+
+async def test_admin_off_sale_product_and_force_cancel_order(test_context, strong_password):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    session_factory = test_context["session_factory"]
+
+    user = await register_user(client, cache, "13800138107", strong_password)
+    user_token = await login_user(client, "13800138107", strong_password)
+    await create_admin(session_factory, strong_password)
+    admin_token = await login_user(client, "13800138999", strong_password)
+
+    async with session_factory() as session:
+        merchant = Merchant(
+            owner_user_id=user["id"],
+            shop_name="Force Ops Shop",
+            contact_name="Sang",
+            contact_phone="13800138107",
+            business_scope="pet food",
+            status="approved",
+        )
+        category = ProductCategory(name="Force Ops Food", sort_order=1)
+        session.add_all([merchant, category])
+        await session.flush()
+        product = Product(
+            merchant_id=merchant.id,
+            category_id=category.id,
+            title="Force Cancel Cat Food",
+            price=1000,
+            stock=3,
+            status=ProductStatus.ON_SALE.value,
+            description="for admin force tests",
+            applicable_pet_type="cat",
+        )
+        session.add(product)
+        await session.flush()
+        sku = ProductSku(
+            product_id=product.id,
+            sku_code="FORCE-CAT-FOOD-1",
+            name="1kg",
+            specs={"weight": "1kg"},
+            price=1000,
+            stock=3,
+        )
+        session.add(sku)
+        await session.flush()
+        order = Order(
+            order_no="PMFORCE001",
+            user_id=user["id"],
+            merchant_id=merchant.id,
+            total_amount=2000,
+            discount_amount=0,
+            coin_deduct_amount=0,
+            pay_amount=2000,
+            status="pending_payment",
+            address_snapshot={
+                "receiver_name": "Sang",
+                "receiver_phone": "13800138107",
+                "province": "Shanghai",
+                "city": "Shanghai",
+                "district": "Pudong",
+                "detail_address": "No.2 Road",
+            },
+        )
+        order.items.append(
+            OrderItem(
+                product_id=product.id,
+                sku_id=sku.id,
+                product_title=product.title,
+                sku_name=sku.name,
+                sku_specs=sku.specs,
+                product_image=None,
+                unit_price=1000,
+                quantity=2,
+                subtotal=2000,
+            )
+        )
+        product.stock = 1
+        sku.stock = 1
+        session.add(order)
+        await session.flush()
+        session.add(
+            PaymentTransaction(
+                out_trade_no="TRADEFORCE001",
+                business_type="order",
+                business_id=order.id,
+                pay_channel="mock",
+                payment_mode="mock",
+                amount=2000,
+                status=PaymentStatus.CREATED.value,
+            )
+        )
+        await session.commit()
+        product_id = product.id
+        order_id = order.id
+        sku_id = sku.id
+
+    user_off_sale = await client.post(
+        f"/admin/products/{product_id}/off-sale",
+        headers=auth_headers(user_token),
+        json={"reason": "risk"},
+    )
+    assert user_off_sale.status_code == 403
+
+    off_sale = await client.post(
+        f"/admin/products/{product_id}/off-sale",
+        headers=auth_headers(admin_token),
+        json={"reason": "admin risk control"},
+    )
+    assert off_sale.status_code == 200, off_sale.text
+
+    user_cancel = await client.post(
+        f"/admin/orders/{order_id}/force-cancel",
+        headers=auth_headers(user_token),
+        json={"reason": "risk"},
+    )
+    assert user_cancel.status_code == 403
+
+    cancelled = await client.post(
+        f"/admin/orders/{order_id}/force-cancel",
+        headers=auth_headers(admin_token),
+        json={"reason": "customer risk"},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["payment_status"] == PaymentStatus.CLOSED.value
+
+    cancelled_again = await client.post(
+        f"/admin/orders/{order_id}/force-cancel",
+        headers=auth_headers(admin_token),
+        json={"reason": "retry"},
+    )
+    assert cancelled_again.status_code == 200, cancelled_again.text
+
+    async with session_factory() as session:
+        stored_product = await session.get(Product, product_id)
+        stored_sku = await session.get(ProductSku, sku_id)
+        assert stored_product.status == ProductStatus.OFF_SHELF.value
+        assert stored_product.stock == 3
+        assert stored_sku.stock == 3
+        logs = (
+            await session.execute(
+                select(AdminActionLog).where(
+                    AdminActionLog.target_type == "order",
+                    AdminActionLog.target_id == order_id,
+                    AdminActionLog.action == "force_cancel",
+                )
+            )
+        ).scalars().all()
+        assert len(logs) == 1
 
 
 async def test_qa_agent_medical_and_high_risk_safety_prompt(test_context, strong_password):

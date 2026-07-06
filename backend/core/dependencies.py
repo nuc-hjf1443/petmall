@@ -12,6 +12,7 @@ from repository.user_repository import get_user_by_id
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
@@ -34,6 +35,15 @@ async def get_current_user(
     if user.token_version != int(token_version):
         raise unauthorized("Token version expired")
     return user
+
+
+async def get_optional_current_user(
+    token: str | None = Depends(optional_oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    if token is None:
+        return None
+    return await get_current_user(token, db)
 
 
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:

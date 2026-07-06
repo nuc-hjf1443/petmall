@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.dependencies import get_current_user, get_db
+from core.dependencies import get_current_user, get_db, get_optional_current_user
 from models.community import PostFavorite, PostLike
 from models.user import User
 from repository.community_repository import list_enabled_topics
@@ -16,8 +16,18 @@ router = APIRouter(tags=["community"])
 
 
 @router.get("/posts", response_model=list[PostResponse])
-async def list_posts(page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db)):
-    return await get_posts(db, max(page, 1), min(max(page_size, 1), 100))
+async def list_posts(
+    page: int = 1,
+    page_size: int = 20,
+    current_user: User | None = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_posts(
+        db,
+        max(page, 1),
+        min(max(page_size, 1), 100),
+        current_user.id if current_user else None,
+    )
 
 
 @router.post("/posts", response_model=PostResponse)
@@ -32,8 +42,12 @@ async def publish_post(
 
 
 @router.get("/posts/{post_id}", response_model=PostResponse)
-async def post_detail(post_id: int, db: AsyncSession = Depends(get_db)):
-    return await get_post(db, post_id)
+async def post_detail(
+    post_id: int,
+    current_user: User | None = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_post(db, post_id, current_user.id if current_user else None)
 
 
 @router.delete("/posts/{post_id}")
