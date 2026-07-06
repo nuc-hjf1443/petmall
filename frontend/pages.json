@@ -1,17 +1,39 @@
 {
-	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
-		{
-			"path": "pages/index/index",
-			"style": {
-				"navigationBarTitleText": "uni-app"
-			}
-		}
+	"pages": [
+		{ "path": "pages/home/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/mall/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/adoption/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/community/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/profile/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/auth/login", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/agent/chat", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/agent/guide", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/pet/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/pet/detail", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/cart/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/mall/detail", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/profile/edit", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/address/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/order/confirm", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/order/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/order/detail", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/payment/result", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/coin/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/knowledge/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/community/detail", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/community/publish", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/adoption/detail", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/adoption/publish", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/adoption/my", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/merchant/index", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/merchant/product-edit", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/admin/login", "style": { "navigationStyle": "custom" } },
+		{ "path": "pages/admin/index", "style": { "navigationStyle": "custom" } }
 	],
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "uni-app",
-		"navigationBarBackgroundColor": "#F8F8F8",
-		"backgroundColor": "#F8F8F8"
-	},
-	"uniIdRouter": {}
+		"navigationBarTitleText": "宠爱有家",
+		"navigationBarBackgroundColor": "#fffaf5",
+		"backgroundColor": "#fffaf5"
+	}
 }
