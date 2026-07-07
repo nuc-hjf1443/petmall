@@ -24,8 +24,11 @@ async def list_public_products(
     db: AsyncSession,
     *,
     keyword: str | None,
-    category_id: int | None,
+    brand_keyword: str | None,
+    category_ids: list[int] | None,
     pet_type: str | None,
+    min_price: int | None,
+    max_price: int | None,
     page: int,
     page_size: int,
 ) -> tuple[list[Product], int]:
@@ -36,10 +39,17 @@ async def list_public_products(
     if keyword:
         pattern = f"%{keyword.strip()}%"
         filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
-    if category_id is not None:
-        filters.append(Product.category_id == category_id)
+    if brand_keyword:
+        pattern = f"%{brand_keyword.strip()}%"
+        filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
+    if category_ids is not None:
+        filters.append(Product.category_id.in_(category_ids))
     if pet_type:
         filters.append(Product.applicable_pet_type == pet_type.strip())
+    if min_price is not None:
+        filters.append(Product.price >= min_price)
+    if max_price is not None:
+        filters.append(Product.price <= max_price)
 
     total = await db.scalar(
         select(func.count(Product.id))
@@ -146,6 +156,30 @@ async def get_category_by_id(
     category_id: int,
 ) -> ProductCategory | None:
     return await db.get(ProductCategory, category_id)
+
+
+async def category_has_children(
+    db: AsyncSession,
+    category_id: int,
+) -> bool:
+    child_id = await db.scalar(
+        select(ProductCategory.id)
+        .where(
+            ProductCategory.parent_id == category_id,
+            ProductCategory.is_enabled.is_(True),
+        )
+        .limit(1)
+    )
+    return child_id is not None
+
+
+async def list_enabled_category_ids(db: AsyncSession) -> list[tuple[int, int | None]]:
+    result = await db.execute(
+        select(ProductCategory.id, ProductCategory.parent_id)
+        .where(ProductCategory.is_enabled.is_(True))
+        .order_by(ProductCategory.sort_order, ProductCategory.id)
+    )
+    return list(result.all())
 
 
 async def get_product_for_update(

@@ -13,6 +13,7 @@ export { petApi } from './pet'
 export { productApi } from './product'
 export {
 	API_BASE_URL,
+	assetUrl,
 	clearTokens,
 	getAccessToken,
 	request,

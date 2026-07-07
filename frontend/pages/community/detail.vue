@@ -18,7 +18,8 @@
 						</view>
 						<text class="content">{{ post.content || '分享了一组宠物照片' }}</text>
 						<view class="media">
-							<image v-for="m in post.media" :key="m.id" :src="m.file_url" mode="aspectFill" />
+							<video v-for="m in videos" :key="m.id" :src="assetUrl(m.file_url)" class="post-video" controls />
+							<image v-for="m in images" :key="m.id" :src="assetUrl(m.file_url)" mode="aspectFill" />
 						</view>
 						<view class="button-row">
 							<button class="secondary-button" @click="toggleLike">
@@ -60,7 +61,7 @@
 <script>
 import AppShell from '../../components/AppShell.vue'
 import StatePanel from '../../components/StatePanel.vue'
-import { communityApi } from '../../api'
+import { assetUrl, communityApi } from '../../api'
 
 export default {
 	components: { AppShell, StatePanel },
@@ -77,7 +78,16 @@ export default {
 		this.id = query.id
 		this.load()
 	},
+	computed: {
+		images() {
+			return (this.post?.media || []).filter(item => item.media_type !== 'video')
+		},
+		videos() {
+			return (this.post?.media || []).filter(item => item.media_type === 'video')
+		}
+	},
 	methods: {
+		assetUrl,
 		async load() {
 			this.loading = true
 			const result = await Promise.allSettled([
@@ -154,5 +164,5 @@ export default {
 </script>
 
 <style scoped>
-.author{display:flex;align-items:center;gap:12px}.author button{margin-left:auto}.avatar{display:flex;width:44px;height:44px;align-items:center;justify-content:center;border-radius:50%;background:var(--color-primary-soft);font-weight:800}.content{display:block;margin:24px 0;font-size:16px;line-height:1.9}.media{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.media image{width:100%;height:190px;border-radius:10px}@media(max-width:767px){.media image{height:110px}}
+.author{display:flex;align-items:center;gap:12px}.author button{margin-left:auto}.avatar{display:flex;width:44px;height:44px;align-items:center;justify-content:center;border-radius:50%;background:var(--color-primary-soft);font-weight:800}.content{display:block;margin:24px 0;font-size:16px;line-height:1.9}.media{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.media image,.post-video{width:100%;height:190px;border-radius:10px;background:#f7f3ef}.post-video{grid-column:1/-1;height:360px}@media(max-width:767px){.media image{height:110px}.post-video{height:210px}}
 </style>

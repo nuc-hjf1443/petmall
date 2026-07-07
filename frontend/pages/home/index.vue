@@ -47,7 +47,7 @@
 			<scroll-view class="product-scroll" scroll-x>
 				<view class="product-row">
 					<view v-for="(product, index) in products" :key="product.id || index" class="product-card card" @click="go(`/pages/mall/detail?id=${product.id}`)">
-						<image v-if="product.cover_image" class="product-image" :src="product.cover_image" mode="aspectFill" />
+						<image v-if="product.cover_image" class="product-image" :src="assetUrl(product.cover_image)" mode="aspectFill" />
 						<view v-else class="product-placeholder">{{ ['🥫','🦴','🧸','🧴'][index % 4] }}</view>
 						<text class="product-title">{{ product.title }}</text>
 						<text class="product-price">{{ money(product.price) }}</text>
@@ -72,7 +72,7 @@
 <script>
 import AppShell from '../../components/AppShell.vue'
 import StatePanel from '../../components/StatePanel.vue'
-import { petApi, productApi } from '../../api'
+import { assetUrl, petApi, productApi } from '../../api'
 import { formatMoney } from '../../utils/format'
 
 export default {
@@ -102,6 +102,7 @@ export default {
 		this.load()
 	},
 	methods: {
+		assetUrl,
 		go(url) { uni.navigateTo({ url }) },
 		money: formatMoney,
 		petEmoji(type) { return String(type).toLowerCase().includes('cat') || type === '猫' ? '🐱' : '🐶' },

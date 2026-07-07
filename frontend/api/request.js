@@ -27,6 +27,13 @@ function unwrap(data) {
 	return data?.data ?? data
 }
 
+function assetUrl(url) {
+	if (!url || typeof url !== 'string') return ''
+	if (/^(https?:|data:|blob:|file:)/i.test(url)) return url
+	if (url.startsWith('/generated/')) return `${API_BASE_URL}${url}`
+	return url
+}
+
 function parseResponseData(data) {
 	if (typeof data !== 'string') return data
 	try {
@@ -212,6 +219,7 @@ export function upload({
 export {
 	ACCESS_TOKEN_KEY,
 	API_BASE_URL,
+	assetUrl,
 	clearTokens,
 	getAccessToken,
 	setTokens
