@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 
 backend/.env
+deploy/.env
 backend/generated/
 frontend/unpackage/
 frontend/node_modules/
