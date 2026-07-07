@@ -34,12 +34,40 @@ def _canonical(params: dict[str, Any]) -> str:
     return "&".join(f"{key}={value}" for key, value in sorted(params.items()) if value not in (None, ""))
 
 
-def _normalize_key(value: str) -> bytes:
-    return value.replace("\\n", "\n").encode()
+def _normalize_pem(value: str, key_type: str) -> bytes:
+    normalized = value.strip().replace("\\n", "\n")
+    if "-----BEGIN " in normalized:
+        return normalized.encode()
+    body = "".join(normalized.split())
+    lines = "\n".join(body[index : index + 64] for index in range(0, len(body), 64))
+    return f"-----BEGIN {key_type}-----\n{lines}\n-----END {key_type}-----\n".encode()
+
+
+def _load_private_key(private_key_text: str):
+    errors: list[Exception] = []
+    for key_type in ("PRIVATE KEY", "RSA PRIVATE KEY"):
+        try:
+            return serialization.load_pem_private_key(
+                _normalize_pem(private_key_text, key_type),
+                password=None,
+            )
+        except ValueError as exc:
+            errors.append(exc)
+    raise conflict("Alipay private key format is invalid")
+
+
+def _load_public_key(public_key_text: str):
+    errors: list[Exception] = []
+    for key_type in ("PUBLIC KEY", "RSA PUBLIC KEY"):
+        try:
+            return serialization.load_pem_public_key(_normalize_pem(public_key_text, key_type))
+        except ValueError as exc:
+            errors.append(exc)
+    raise bad_request("Alipay public key format is invalid")
 
 
 def _sign(content: str, private_key_text: str) -> str:
-    key = serialization.load_pem_private_key(_normalize_key(private_key_text), password=None)
+    key = _load_private_key(private_key_text)
     signature = key.sign(content.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
     return base64.b64encode(signature).decode()
 
@@ -48,7 +76,7 @@ def _verify_signature_content(content: str, signature: str, public_key_text: str
     if not signature or not public_key_text:
         return False
     try:
-        key = serialization.load_pem_public_key(_normalize_key(public_key_text))
+        key = _load_public_key(public_key_text)
         key.verify(
             base64.b64decode(signature),
             content.encode("utf-8"),
@@ -93,6 +121,7 @@ def _payment_response(payment: PaymentTransaction, pay_url: str | None = None) -
     return PaymentResponse(
         out_trade_no=payment.out_trade_no,
         order_id=payment.business_id,
+        business_type=payment.business_type,
         amount=payment.amount,
         status=payment.status,
         payment_mode=payment.payment_mode,
@@ -123,7 +152,7 @@ def build_alipay_page_url(payment: PaymentTransaction) -> str:
             {
                 "out_trade_no": payment.out_trade_no,
                 "total_amount": f"{payment.amount / 100:.2f}",
-                "subject": f"PetMall order {payment.business_id}",
+                "subject": f"PetMall {payment.business_type} {payment.business_id}",
                 "product_code": "FAST_INSTANT_TRADE_PAY",
             },
             ensure_ascii=False,
@@ -175,7 +204,15 @@ async def get_payment_result(db: AsyncSession, user_id: int, out_trade_no: str) 
     payment = await get_payment_by_trade_no(db, out_trade_no)
     if payment is None:
         raise not_found("Payment not found")
-    if await get_order(db, payment.business_id, user_id) is None:
+    if payment.business_type == "order":
+        if await get_order(db, payment.business_id, user_id) is None:
+            raise not_found("Payment not found")
+    elif payment.business_type == "wallet_recharge":
+        from services.wallet_service import ensure_payment_owner
+
+        if not await ensure_payment_owner(db, payment, user_id):
+            raise not_found("Payment not found")
+    else:
         raise not_found("Payment not found")
     return _payment_response(payment)
 
@@ -183,6 +220,12 @@ async def get_payment_result(db: AsyncSession, user_id: int, out_trade_no: str) 
 async def _complete_payment(
     db: AsyncSession, payment: PaymentTransaction, channel_trade_no: str, raw: dict[str, Any]
 ) -> PaymentResponse:
+    if payment.business_type == "wallet_recharge":
+        from services.wallet_service import complete_wallet_recharge
+
+        return await complete_wallet_recharge(db, payment, channel_trade_no, _sanitize(raw))
+    if payment.business_type != "order":
+        raise conflict("Unsupported payment business type")
     if payment.status == PaymentStatus.PAID.value:
         return _payment_response(payment)
     order = await get_order(db, payment.business_id, lock=True)
@@ -201,11 +244,13 @@ async def _complete_payment(
 
 async def confirm_mock_payment(db: AsyncSession, out_trade_no: str) -> PaymentResponse:
     settings = get_settings()
-    if settings.payment_mode != "mock" or not settings.mock_payment_enabled:
+    if not settings.mock_payment_enabled:
         raise conflict("Mock payment is unavailable")
     payment = await get_payment_by_trade_no(db, out_trade_no, lock=True)
     if payment is None:
         raise not_found("Payment not found")
+    if payment.payment_mode != "mock":
+        raise conflict("Payment is not a mock payment")
     return await _complete_payment(db, payment, f"MOCK-{out_trade_no}", {"source": "mock"})
 
 
@@ -228,12 +273,17 @@ async def process_alipay_notify(db: AsyncSession, params: dict[str, Any]) -> Non
 
 
 async def query_alipay_payment(db: AsyncSession, user_id: int, out_trade_no: str) -> PaymentResponse:
-    settings = get_settings()
     payment = await get_payment_by_trade_no(db, out_trade_no, lock=True)
-    if payment is None or await get_order(db, payment.business_id, user_id) is None:
+    if payment is None:
         raise not_found("Payment not found")
-    if settings.payment_mode != "alipay_sandbox":
+    await get_payment_result(db, user_id, out_trade_no)
+    settings = get_settings()
+    if payment.payment_mode != "alipay_sandbox":
         return _payment_response(payment)
+    if not settings.alipay_app_id or not settings.alipay_private_key:
+        raise conflict("Alipay sandbox is not configured")
+    if payment.business_type == "order" and await get_order(db, payment.business_id, user_id) is None:
+        raise not_found("Payment not found")
     params = {
         "app_id": settings.alipay_app_id,
         "method": "alipay.trade.query",

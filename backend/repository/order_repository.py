@@ -71,9 +71,15 @@ async def get_order_reward_delivery(
     return (await db.execute(statement)).scalar_one_or_none()
 
 
-async def get_payment_by_business(db: AsyncSession, order_id: int, lock: bool = False) -> PaymentTransaction | None:
+async def get_payment_by_business(
+    db: AsyncSession,
+    business_id: int,
+    lock: bool = False,
+    business_type: str = "order",
+) -> PaymentTransaction | None:
     statement = select(PaymentTransaction).where(
-        PaymentTransaction.business_type == "order", PaymentTransaction.business_id == order_id
+        PaymentTransaction.business_type == business_type,
+        PaymentTransaction.business_id == business_id,
     )
     if lock:
         statement = statement.with_for_update()
