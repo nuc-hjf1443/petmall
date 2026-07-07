@@ -41,6 +41,7 @@ class OrderResponse(BaseModel):
 class PaymentResponse(BaseModel):
     out_trade_no: str
     order_id: int
+    business_type: str = "order"
     amount: int
     status: str
     payment_mode: str

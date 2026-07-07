@@ -50,6 +50,7 @@
 									<view class="data-row"><text class="data-main">待审核商品</text><text class="status-chip">{{ products.length }}</text></view>
 									<view class="data-row"><text class="data-main">待审核商家</text><text class="status-chip">{{ merchants.length }}</text></view>
 									<view class="data-row"><text class="data-main">领养申请</text><text class="status-chip">{{ adoptions.length }}</text></view>
+									<view class="data-row"><text class="data-main">提现申请</text><text class="status-chip">{{ pendingWithdrawals.length }}</text></view>
 									<view class="data-row"><text class="data-main">内容举报</text><text class="status-chip">{{ reports.length }}</text></view>
 								</view>
 							</view>
@@ -186,6 +187,22 @@
 							</view>
 						</view>
 					</view>
+
+					<view v-else-if="tab === 'withdrawals'" class="card panel">
+						<text class="panel-title">提现审核</text>
+						<StatePanel v-if="!withdrawals.length" icon="-" title="没有提现申请" />
+						<view v-else class="data-list">
+							<view v-for="item in withdrawals" :key="item.id" class="data-row">
+								<view class="data-main">
+									<text class="data-title">{{ item.withdrawal_no }} · {{ money(item.amount) }}</text>
+									<text class="data-meta">用户 {{ item.user_id }} · {{ item.account_name }} · {{ item.alipay_account }} · {{ item.status }}</text>
+								</view>
+								<text class="status-chip">{{ withdrawalStatus(item.status) }}</text>
+								<button v-if="item.status === 'pending'" class="action-button" @click="approveWithdrawal(item)">通过</button>
+								<button v-if="item.status === 'pending'" class="danger-button" @click="rejectWithdrawal(item)">驳回</button>
+							</view>
+						</view>
+					</view>
 				</view>
 			</scroll-view>
 		</view>
@@ -194,7 +211,7 @@
 
 <script>
 import StatePanel from '../../components/StatePanel.vue'
-import { adminApi, productApi, userApi, clearTokens } from '../../api'
+import { adminApi, productApi, userApi, walletApi, clearTokens } from '../../api'
 import { formatMoney } from '../../utils/format'
 
 export default {
@@ -213,6 +230,7 @@ export default {
 			merchants: [],
 			reports: [],
 			adoptions: [],
+			withdrawals: [],
 			tabs: [
 				{ key: 'dashboard', icon: 'D', label: '数据面板', desc: '平台待办和经营概览' },
 				{ key: 'users', icon: 'U', label: '用户管理', desc: '账号状态与冻结管理' },
@@ -221,7 +239,8 @@ export default {
 				{ key: 'orders', icon: 'O', label: '订单管理', desc: '全平台订单与强制取消' },
 				{ key: 'merchants', icon: 'M', label: '商家审核', desc: '审核商家入驻申请' },
 				{ key: 'content', icon: 'C', label: '内容审核', desc: '处理社区内容举报' },
-				{ key: 'adoptions', icon: 'R', label: '领养审核', desc: '审核用户领养申请' }
+				{ key: 'adoptions', icon: 'R', label: '领养审核', desc: '审核用户领养申请' },
+				{ key: 'withdrawals', icon: 'W', label: '提现审核', desc: '模拟打款与余额扣减审核' }
 			]
 		}
 	},
@@ -235,8 +254,11 @@ export default {
 				{ label: '宠物档案', value: this.overview.pet_count || this.pets.length },
 				{ label: '订单总数', value: this.overview.order_count || this.orders.length },
 				{ label: 'GMV', value: this.money(this.overview.gmv) },
-				{ label: '内容举报', value: this.reports.length }
+				{ label: '提现申请', value: this.pendingWithdrawals.length }
 			]
+		},
+		pendingWithdrawals() {
+			return this.withdrawals.filter(item => item.status === 'pending')
 		}
 	},
 	onLoad() {
@@ -270,7 +292,8 @@ export default {
 				adminApi.pets({ page: 1, page_size: 100 }),
 				adminApi.orders({ page: 1, page_size: 100 }),
 				adminApi.statisticsOverview(),
-				productApi.list({ page: 1, page_size: 100 })
+				productApi.list({ page: 1, page_size: 100 }),
+				walletApi.adminWithdrawals({ page: 1, page_size: 100 })
 			])
 			if (result[0].status === 'fulfilled') this.users = result[0].value || []
 			if (result[1].status === 'fulfilled') this.products = result[1].value?.items || []
@@ -281,7 +304,11 @@ export default {
 			if (result[6].status === 'fulfilled') this.orders = result[6].value?.items || []
 			if (result[7].status === 'fulfilled') this.overview = result[7].value || {}
 			if (result[8].status === 'fulfilled') this.saleProducts = result[8].value?.items || []
+			if (result[9].status === 'fulfilled') this.withdrawals = result[9].value?.items || []
 			this.loading = false
+		},
+		withdrawalStatus(status) {
+			return { pending: '待审核', approved: '已通过', rejected: '已驳回' }[status] || status
 		},
 		reason(title, callback, required = false) {
 			uni.showModal({
@@ -368,6 +395,20 @@ export default {
 			this.reason('驳回领养申请', async reason => {
 				await adminApi.rejectAdoptionApplication(item.id, { reason })
 				uni.showToast({ title: '申请已驳回' })
+				this.loadAll()
+			}, true)
+		},
+		approveWithdrawal(item) {
+			this.reason('通过提现申请', async reason => {
+				await walletApi.approveWithdrawal(item.id, { reason })
+				uni.showToast({ title: '提现已通过' })
+				this.loadAll()
+			})
+		},
+		rejectWithdrawal(item) {
+			this.reason('驳回提现申请', async reason => {
+				await walletApi.rejectWithdrawal(item.id, { reason })
+				uni.showToast({ title: '提现已驳回' })
 				this.loadAll()
 			}, true)
 		},

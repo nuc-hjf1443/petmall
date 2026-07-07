@@ -22,6 +22,14 @@ from models.order import (
     PaymentStatus,
     PaymentTransaction,
 )
+from models.wallet import (
+    WalletAccount,
+    WalletRecharge,
+    WalletTransaction,
+    WalletTransactionType,
+    WithdrawalRequest,
+    WithdrawalStatus,
+)
 from models.community import (
     Follow,
     Post,
@@ -88,6 +96,12 @@ __all__ = [
     "OrderStatus",
     "PaymentStatus",
     "PaymentTransaction",
+    "WalletAccount",
+    "WalletRecharge",
+    "WalletTransaction",
+    "WalletTransactionType",
+    "WithdrawalRequest",
+    "WithdrawalStatus",
     "Post",
     "PostComment",
     "PostFavorite",
