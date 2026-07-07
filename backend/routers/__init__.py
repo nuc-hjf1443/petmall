@@ -6,6 +6,7 @@ from routers import (
     order_router,
     payment_router,
     product_router,
+    upload_router,
     user_router,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "order_router",
     "payment_router",
     "product_router",
+    "upload_router",
     "user_router",
 ]

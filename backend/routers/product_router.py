@@ -33,8 +33,11 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
 @router.get("/products", response_model=ProductListResponse)
 async def list_products(
     keyword: Annotated[str | None, Query(max_length=100)] = None,
+    brand_keyword: Annotated[str | None, Query(max_length=100)] = None,
     category_id: Annotated[int | None, Query(gt=0)] = None,
     pet_type: Annotated[str | None, Query(max_length=64)] = None,
+    min_price: Annotated[int | None, Query(ge=0)] = None,
+    max_price: Annotated[int | None, Query(ge=0)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     db: AsyncSession = Depends(get_db),
@@ -42,8 +45,11 @@ async def list_products(
     return await get_products(
         db,
         keyword=keyword,
+        brand_keyword=brand_keyword,
         category_id=category_id,
         pet_type=pet_type,
+        min_price=min_price,
+        max_price=max_price,
         page=page,
         page_size=page_size,
     )

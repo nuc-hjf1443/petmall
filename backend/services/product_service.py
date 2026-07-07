@@ -4,12 +4,14 @@ from core.errors import bad_request, conflict, not_found
 from models.base import utc_now
 from models.product import Product, ProductImage, ProductSku, ProductStatus
 from repository.product_repository import (
+    category_has_children,
     get_category_by_id,
     get_product_by_id,
     get_product_for_update,
     get_public_product_by_id,
     get_sku_by_code,
     list_enabled_categories,
+    list_enabled_category_ids,
     list_products_by_merchant,
     list_products_by_status,
     list_public_products,
@@ -176,20 +178,57 @@ async def get_categories(db: AsyncSession):
     return await list_enabled_categories(db)
 
 
+async def _ensure_leaf_category(db: AsyncSession, category_id: int):
+    category = await get_category_by_id(db, category_id)
+    if category is None or not category.is_enabled:
+        raise bad_request("Product category is unavailable")
+    if await category_has_children(db, category.id):
+        raise bad_request("Please select a leaf product category")
+    return category
+
+
+async def _category_subtree_ids(db: AsyncSession, category_id: int | None) -> list[int] | None:
+    if category_id is None:
+        return None
+    category_rows = await list_enabled_category_ids(db)
+    enabled_ids = {item_id for item_id, _ in category_rows}
+    if category_id not in enabled_ids:
+        return []
+
+    children_by_parent: dict[int | None, list[int]] = {}
+    for item_id, parent_id in category_rows:
+        children_by_parent.setdefault(parent_id, []).append(item_id)
+
+    ids: list[int] = []
+    stack = [category_id]
+    while stack:
+        current_id = stack.pop()
+        ids.append(current_id)
+        stack.extend(children_by_parent.get(current_id, []))
+    return ids
+
+
 async def get_products(
     db: AsyncSession,
     *,
     keyword: str | None,
+    brand_keyword: str | None,
     category_id: int | None,
     pet_type: str | None,
+    min_price: int | None,
+    max_price: int | None,
     page: int,
     page_size: int,
 ) -> ProductListResponse:
+    category_ids = await _category_subtree_ids(db, category_id)
     products, total = await list_public_products(
         db,
         keyword=keyword,
-        category_id=category_id,
+        brand_keyword=brand_keyword,
+        category_ids=category_ids,
         pet_type=pet_type,
+        min_price=min_price,
+        max_price=max_price,
         page=page,
         page_size=page_size,
     )
@@ -223,9 +262,7 @@ async def create_merchant_product(
     merchant_id: int,
     payload: ProductCreate,
 ) -> ProductDetailResponse:
-    category = await get_category_by_id(db, payload.category_id)
-    if category is None or not category.is_enabled:
-        raise bad_request("Product category is unavailable")
+    category = await _ensure_leaf_category(db, payload.category_id)
     skus = await _build_new_skus(db, payload.skus)
     product = Product(
         merchant_id=merchant_id,
@@ -267,9 +304,7 @@ async def update_merchant_product(
     for field, value in data.items():
         setattr(product, field, value)
     if payload.category_id is not None:
-        category = await get_category_by_id(db, payload.category_id)
-        if category is None or not category.is_enabled:
-            raise bad_request("Product category is unavailable")
+        category = await _ensure_leaf_category(db, payload.category_id)
         product.category_id = category.id
         product.category = category
     if payload.skus is not None:
