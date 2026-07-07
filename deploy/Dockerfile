@@ -7,8 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY backend/requirements.txt ./requirements.txt
-RUN python -m pip install --upgrade pip \
-    && python -m pip install -r requirements.txt
+
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN python -m pip install --upgrade pip -i ${PIP_INDEX_URL} \
+    && python -m pip install -r requirements.txt -i ${PIP_INDEX_URL} --timeout 120
 
 COPY backend/ ./
 

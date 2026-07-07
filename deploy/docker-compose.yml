@@ -50,6 +50,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     image: petmall-backend:${PETMALL_IMAGE_TAG:-local}
     environment:
       <<: *backend-env
@@ -71,6 +73,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     command: ["python", "-m", "workers.knowledge_worker"]
     environment:
       <<: *backend-env
@@ -90,6 +94,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     command: ["python", "-m", "alembic", "upgrade", "head"]
     environment:
       <<: *backend-env
@@ -103,6 +109,7 @@ services:
       context: ..
       dockerfile: deploy/frontend.Dockerfile
       args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
     image: petmall-frontend:${PETMALL_IMAGE_TAG:-local}
     ports:
