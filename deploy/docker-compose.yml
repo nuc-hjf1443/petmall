@@ -56,7 +56,7 @@ services:
     environment:
       <<: *backend-env
     ports:
-      - "${PETMALL_API_PUBLISHED_PORT:-8000}:8000"
+      - "${PETMALL_API_BIND_HOST:-0.0.0.0}:${PETMALL_API_PUBLISHED_PORT:-8000}:8000"
     volumes:
       - ../backend/generated:/app/generated
     depends_on:
@@ -87,6 +87,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   migrate:
@@ -113,12 +115,12 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
     image: petmall-frontend:${PETMALL_IMAGE_TAG:-local}
     ports:
-      - "${PETMALL_FRONTEND_PUBLISHED_PORT:-8080}:80"
+      - "${PETMALL_FRONTEND_BIND_HOST:-0.0.0.0}:${PETMALL_FRONTEND_PUBLISHED_PORT:-8080}:80"
     volumes:
       - ../backend/generated:/var/www/petmall/generated:ro
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   mysql:
@@ -130,7 +132,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     ports:
-      - "${PETMALL_MYSQL_PUBLISHED_PORT:-3306}:3306"
+      - "${PETMALL_MYSQL_BIND_HOST:-127.0.0.1}:${PETMALL_MYSQL_PUBLISHED_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -143,7 +145,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${PETMALL_REDIS_PUBLISHED_PORT:-6379}:6379"
+      - "${PETMALL_REDIS_BIND_HOST:-127.0.0.1}:${PETMALL_REDIS_PUBLISHED_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -156,8 +158,8 @@ services:
   rabbitmq:
     image: rabbitmq:4-management-alpine
     ports:
-      - "${PETMALL_RABBITMQ_PUBLISHED_PORT:-5672}:5672"
-      - "${PETMALL_RABBITMQ_MANAGEMENT_PUBLISHED_PORT:-15672}:15672"
+      - "${PETMALL_RABBITMQ_BIND_HOST:-127.0.0.1}:${PETMALL_RABBITMQ_PUBLISHED_PORT:-5672}:5672"
+      - "${PETMALL_RABBITMQ_BIND_HOST:-127.0.0.1}:${PETMALL_RABBITMQ_MANAGEMENT_PUBLISHED_PORT:-15672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -171,7 +173,7 @@ services:
     image: ollama/ollama:0.9.6
     profiles: ["rag"]
     ports:
-      - "${PETMALL_OLLAMA_PUBLISHED_PORT:-11434}:11434"
+      - "${PETMALL_OLLAMA_BIND_HOST:-127.0.0.1}:${PETMALL_OLLAMA_PUBLISHED_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
@@ -184,7 +186,7 @@ services:
       POSTGRES_USER: ${PETMALL_POSTGRES_USER:-petmall}
       POSTGRES_PASSWORD: ${PETMALL_POSTGRES_PASSWORD:-change_me}
     ports:
-      - "${PETMALL_POSTGRES_PUBLISHED_PORT:-5432}:5432"
+      - "${PETMALL_POSTGRES_BIND_HOST:-127.0.0.1}:${PETMALL_POSTGRES_PUBLISHED_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
