@@ -18,6 +18,7 @@ from routers import (
     product_router,
     upload_router,
     user_router,
+    wallet_router,
 )
 from settings.config import get_settings
 
@@ -51,6 +52,7 @@ app.include_router(upload_router.router)
 app.include_router(cart_router.router)
 app.include_router(order_router.router)
 app.include_router(payment_router.router)
+app.include_router(wallet_router.router)
 app.include_router(community_router.router)
 app.include_router(knowledge_router.router)
 app.include_router(adoption_router.router)

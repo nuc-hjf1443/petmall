@@ -22,3 +22,4 @@ export {
 } from './request'
 export { systemApi } from './system'
 export { userApi } from './user'
+export { walletApi } from './wallet'

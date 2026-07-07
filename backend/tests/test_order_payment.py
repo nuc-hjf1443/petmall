@@ -2,12 +2,15 @@ import pytest
 import base64
 import json
 
+from sqlalchemy import select
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from core.errors import AppException
 from models.order import Order, OrderRewardDelivery, OrderStatus
 from models.product import Product, ProductCategory, ProductSku
+from models.user import User
+from models.wallet import WalletAccount, WithdrawalRequest
 from main import app
 from services.coin_service import RealCoinRewardAdapter
 from services.order_service import (
@@ -15,7 +18,7 @@ from services.order_service import (
     get_coin_reward_adapter,
     transition_fulfillment,
 )
-from services.payment_service import _extract_signed_response
+from services.payment_service import _extract_signed_response, _sign, verify_alipay_signature
 from settings.config import get_settings
 
 
@@ -66,6 +69,25 @@ async def test_alipay_query_response_signature():
         assert verified["trade_no"] == "T1"
     finally:
         settings.alipay_public_key = original
+
+
+async def test_alipay_bare_rsa_private_key_is_supported():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    bare_private = private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
+    ).decode()
+    bare_private = "".join(
+        line for line in bare_private.splitlines() if not line.startswith("-----")
+    )
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+    payload = {"app_id": "sandbox", "biz_content": "{}"}
+    signature = _sign("app_id=sandbox&biz_content={}", bare_private)
+    assert verify_alipay_signature({**payload, "sign": signature}, public_pem)
 
 
 def auth(token: str) -> dict[str, str]:
@@ -190,3 +212,61 @@ async def test_order_owner_isolation(test_context, strong_password):
     })
     order_id = order.json()[0]["id"]
     assert (await client.get(f"/orders/{order_id}", headers=auth(token_b))).status_code == 404
+
+
+async def test_wallet_mock_recharge_and_withdrawal_review(test_context, strong_password):
+    client = test_context["client"]
+    token = await register(client, test_context["cache"], "13920000004", strong_password)
+    admin_token = await register(client, test_context["cache"], "13920000005", strong_password)
+    async with test_context["session_factory"]() as db:
+        admin = (await db.execute(select(User).where(User.phone == "13920000005"))).scalar_one()
+        admin.is_admin = True
+        await db.commit()
+
+    created = await client.post(
+        "/wallet/recharges",
+        headers=auth(token),
+        json={"amount": 5000, "payment_mode": "mock"},
+    )
+    assert created.status_code == 200, created.text
+    payment = created.json()["payment"]
+    assert payment["business_type"] == "wallet_recharge"
+    confirmed = await client.post(f"/payments/mock/{payment['out_trade_no']}/confirm", headers=auth(token))
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "paid"
+
+    wallet = await client.get("/wallet/me", headers=auth(token))
+    assert wallet.json()["balance"] == 5000
+    assert wallet.json()["frozen_balance"] == 0
+
+    withdrawal = await client.post(
+        "/wallet/withdrawals",
+        headers=auth(token),
+        json={"amount": 2000, "account_name": "Tester", "alipay_account": "tester@example.com"},
+    )
+    assert withdrawal.status_code == 200, withdrawal.text
+    assert withdrawal.json()["status"] == "pending"
+
+    wallet = await client.get("/wallet/me", headers=auth(token))
+    assert wallet.json()["balance"] == 3000
+    assert wallet.json()["frozen_balance"] == 2000
+
+    reviewed = await client.post(
+        f"/wallet/admin/withdrawals/{withdrawal.json()['id']}/approve",
+        headers=auth(admin_token),
+        json={"reason": "mock payout done"},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["status"] == "approved"
+
+    wallet = await client.get("/wallet/me", headers=auth(token))
+    assert wallet.json()["balance"] == 3000
+    assert wallet.json()["frozen_balance"] == 0
+    async with test_context["session_factory"]() as db:
+        account = (await db.execute(
+            select(WalletAccount).where(WalletAccount.user_id == reviewed.json()["user_id"])
+        )).scalar_one()
+        request = await db.get(WithdrawalRequest, reviewed.json()["id"])
+        assert account.total_recharged == 5000
+        assert account.total_withdrawn == 2000
+        assert request.reviewed_by is not None
