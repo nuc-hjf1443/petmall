@@ -51,7 +51,7 @@
 									<view class="data-row"><text class="data-main">待审核商家</text><text class="status-chip">{{ merchants.length }}</text></view>
 									<view class="data-row"><text class="data-main">领养申请</text><text class="status-chip">{{ adoptions.length }}</text></view>
 									<view class="data-row"><text class="data-main">提现申请</text><text class="status-chip">{{ pendingWithdrawals.length }}</text></view>
-									<view class="data-row"><text class="data-main">内容举报</text><text class="status-chip">{{ reports.length }}</text></view>
+									<view class="data-row"><text class="data-main">内容举报</text><text class="status-chip">{{ pendingReports.length }}</text></view>
 								</view>
 							</view>
 							<view class="card panel">
@@ -159,15 +159,16 @@
 
 					<view v-else-if="tab === 'content'" class="card panel">
 						<text class="panel-title">内容举报</text>
-						<StatePanel v-if="!reports.length" icon="-" title="没有待处理举报" />
+						<StatePanel v-if="!reports.length" icon="-" title="没有内容举报" />
 						<view v-else class="data-list">
 							<view v-for="item in reports" :key="item.id" class="data-row">
 								<view class="data-main">
 									<text class="data-title">{{ item.target_type }} #{{ item.target_id }}</text>
-									<text class="data-meta">举报人 {{ item.reporter_id }} · {{ item.reason }} · {{ item.status }}</text>
+									<text class="data-meta">举报人 {{ item.reporter_id }} · {{ item.reason }} · {{ reportStatusLabel(item) }}</text>
 								</view>
-								<button class="secondary-button" @click="resolveReport(item, 'dismiss')">驳回举报</button>
-								<button class="danger-button" @click="resolveReport(item, 'take_down')">下架内容</button>
+								<text v-if="item.status !== 'pending'" class="status-chip">{{ reportActionLabel(item) }}</text>
+								<button v-if="item.status === 'pending'" class="secondary-button" @click="resolveReport(item, 'dismiss')">驳回举报</button>
+								<button v-if="item.status === 'pending'" class="danger-button" @click="resolveReport(item, 'take_down')">下架内容</button>
 							</view>
 						</view>
 					</view>
@@ -259,6 +260,9 @@ export default {
 		},
 		pendingWithdrawals() {
 			return this.withdrawals.filter(item => item.status === 'pending')
+		},
+		pendingReports() {
+			return this.reports.filter(item => item.status === 'pending')
 		}
 	},
 	onLoad() {
@@ -309,6 +313,13 @@ export default {
 		},
 		withdrawalStatus(status) {
 			return { pending: '待审核', approved: '已通过', rejected: '已驳回' }[status] || status
+		},
+		reportActionLabel(item) {
+			if (item.status === 'pending') return '待处理'
+			return { dismiss: '已驳回举报', take_down: '已下架内容' }[item.action] || '已处理'
+		},
+		reportStatusLabel(item) {
+			return item.status === 'pending' ? '待处理' : this.reportActionLabel(item)
 		},
 		reason(title, callback, required = false) {
 			uni.showModal({
@@ -378,6 +389,10 @@ export default {
 			}, true)
 		},
 		resolveReport(item, action) {
+			if (item.status !== 'pending') {
+				uni.showToast({ title: '举报已处理', icon: 'none' })
+				return
+			}
 			this.reason(action === 'take_down' ? '下架被举报内容' : '驳回举报', async reason => {
 				await adminApi.resolveReport(item.id, { action, reason })
 				uni.showToast({ title: '举报已处理' })

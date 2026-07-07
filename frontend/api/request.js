@@ -117,10 +117,13 @@ function handleResponse(statusCode, rawData, auth, silentStatuses = []) {
 	throw error
 }
 
-function handleNetworkError(error) {
+function handleNetworkError(error, { url, silentNetworkError = false } = {}) {
 	const networkError = new Error('网络请求失败，请检查后端服务是否已启动')
 	networkError.cause = error
-	notify(networkError.message)
+	if (typeof console !== 'undefined' && console.warn) {
+		console.warn('[request network error]', { url, error })
+	}
+	if (!silentNetworkError) notify(networkError.message)
 	throw networkError
 }
 
@@ -131,16 +134,18 @@ export function request({
 	header = {},
 	auth = false,
 	silentStatuses = [],
+	silentNetworkError = false,
 	showLoading = false,
 	loadingText = '加载中'
 }) {
 	const token = getAccessToken()
 	const requestData = method.toUpperCase() === 'GET' ? cleanQueryData(data) : data
+	const fullUrl = `${API_BASE_URL}${url}`
 	if (showLoading) uni.showLoading({ title: loadingText, mask: true })
 
 	return new Promise((resolve, reject) => {
 		uni.request({
-			url: `${API_BASE_URL}${url}`,
+			url: fullUrl,
 			method,
 			data: requestData,
 			header: {
@@ -157,7 +162,7 @@ export function request({
 			},
 			fail: error => {
 				try {
-					handleNetworkError(error)
+					handleNetworkError(error, { url: fullUrl, silentNetworkError })
 				} catch (networkError) {
 					reject(networkError)
 				}
@@ -177,15 +182,17 @@ export function upload({
 	formData = {},
 	header = {},
 	auth = true,
+	silentNetworkError = false,
 	showLoading = false,
 	loadingText = '上传中'
 }) {
 	const token = getAccessToken()
+	const fullUrl = `${API_BASE_URL}${url}`
 	if (showLoading) uni.showLoading({ title: loadingText, mask: true })
 
 	return new Promise((resolve, reject) => {
 		const options = {
-			url: `${API_BASE_URL}${url}`,
+			url: fullUrl,
 			name,
 			formData,
 			header: {
@@ -201,7 +208,7 @@ export function upload({
 			},
 			fail: error => {
 				try {
-					handleNetworkError(error)
+					handleNetworkError(error, { url: fullUrl, silentNetworkError })
 				} catch (networkError) {
 					reject(networkError)
 				}

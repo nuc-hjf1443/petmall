@@ -237,7 +237,9 @@ async def list_reports(db: AsyncSession, page: int, page_size: int) -> PageResul
     return PageResult(
         items=[{
             "id": r.id, "reporter_id": r.reporter_id, "target_type": r.target_type,
-            "target_id": r.target_id, "reason": r.reason, "status": r.status
+            "target_id": r.target_id, "reason": r.reason, "status": r.status,
+            "action": r.action, "resolution_reason": r.resolution_reason,
+            "resolved_by": r.resolved_by,
         } for r in rows],
         total=total, page=page, page_size=page_size
     )
@@ -258,7 +260,7 @@ async def resolve_report(
     if report is None:
         raise not_found("Report not found")
     if report.status == "resolved":
-        return
+        raise conflict("Report already resolved")
     if action == "take_down" and report.target_type == "post":
         await take_down_post(db, report.target_id, reason, admin_id, commit=False)
     report.status = "resolved"
