@@ -616,6 +616,53 @@ async def test_guide_agent_falls_back_to_sale_products_when_query_has_no_exact_m
     assert body["recommendations"][0]["product_id"] == ids["product_id"]
 
 
+async def test_guide_agent_does_not_recommend_cat_products_for_dog_request(
+    test_context,
+    strong_password,
+    monkeypatch,
+):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    session_factory = test_context["session_factory"]
+    await seed_catalog(session_factory)
+
+    async def empty_retrieve_private_knowledge(*args, **kwargs):
+        return []
+
+    async def no_deepseek_guide(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "services.guide_agent_service.retrieve_private_knowledge",
+        empty_retrieve_private_knowledge,
+    )
+    monkeypatch.setattr("core.agent_workflow._call_deepseek_guide", no_deepseek_guide)
+
+    await register_user(client, cache, "13960000016", strong_password)
+    token = await login_user(client, "13960000016", strong_password)
+
+    created_session = await client.post(
+        "/agents/guide/sessions",
+        headers=auth_headers(token),
+        json={"title": "dog food guard"},
+    )
+    assert created_session.status_code == 200, created_session.text
+    session_id = created_session.json()["id"]
+
+    response = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "3 岁柯基，需要低敏狗粮，预算 300 元", "limit": 3},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["recommendations"] == []
+
+    async with session_factory() as session:
+        result = await session.execute(select(AgentRecommendation))
+        assert result.scalars().all() == []
+
+
 async def test_guide_agent_rejects_cross_user_pet_and_session_access(test_context, strong_password):
     client: AsyncClient = test_context["client"]
     cache = test_context["cache"]
