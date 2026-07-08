@@ -1,11 +1,12 @@
 import json
+import logging
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.agent_workflow import run_guide_agent_workflow
+from core.agent_workflow import build_rule_based_guide_history_summary, run_guide_agent_workflow, summarize_guide_history
 from core.errors import not_found
 from core.rag_service import retrieve_private_knowledge
 from models.agent import AgentMessage, AgentRecommendation, AgentSession
@@ -14,6 +15,10 @@ from schemas.agent_schema import GuideSessionCreate
 from services.product_service import get_product_for_agent, search_products_for_agent
 from services.profile_document_service import get_pet_detail_summary
 
+
+logger = logging.getLogger(__name__)
+GUIDE_RECENT_HISTORY_LIMIT = 8
+GUIDE_HISTORY_SUMMARY_MAX_CHARS = 1200
 
 HIGH_RISK_KEYWORDS = (
     "\u4e2d\u6bd2",
@@ -98,22 +103,140 @@ def _messages_to_history(messages: list[AgentMessage]) -> list[dict[str, str]]:
     ]
 
 
+def _json_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed if str(item).strip()]
+    return []
+
+
+def _json_dumps_list(value: Any) -> str | None:
+    items = _json_list(value)
+    if not items:
+        return None
+    return json.dumps(items, ensure_ascii=False)
+
+
+def _safe_score(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(score, 1.0))
+
+
+def _safe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _build_guide_history_context(session: AgentSession) -> tuple[str, list[dict[str, str]]]:
+    messages = sorted(session.messages, key=lambda item: item.id)
+    old_messages = messages[:-GUIDE_RECENT_HISTORY_LIMIT]
+    recent_messages = messages[-GUIDE_RECENT_HISTORY_LIMIT:]
+    recent_history = _messages_to_history(recent_messages)
+    if not old_messages:
+        return session.context_summary or "", recent_history
+
+    old_history = _messages_to_history(old_messages)
+    try:
+        summary = await summarize_guide_history(
+            existing_summary=session.context_summary,
+            history=old_history,
+            max_chars=GUIDE_HISTORY_SUMMARY_MAX_CHARS,
+        )
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_history_summary_failed",
+            extra={
+                "stage": "history_summary",
+                "session_id": session.id,
+                "user_id": session.user_id,
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        summary = build_rule_based_guide_history_summary(
+            session.context_summary,
+            old_history,
+            max_chars=GUIDE_HISTORY_SUMMARY_MAX_CHARS,
+        )
+    session.context_summary = summary
+    return summary, recent_history
+
+
 async def _search_product_candidates(
     db: AsyncSession,
     query: str,
     pet_type: str | None,
     limit: int,
+    *,
+    session_id: int,
+    user_id: int,
 ) -> list[dict[str, Any]]:
-    products = await search_products_for_agent(db, query, pet_type, limit)
-    if products or not pet_type:
+    try:
+        products = await search_products_for_agent(db, query, pet_type, limit)
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_product_search_failed",
+            extra={
+                "stage": "product_search",
+                "session_id": session_id,
+                "user_id": user_id,
+                "query": query,
+                "pet_type": pet_type,
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return []
+    if products:
         return products
-    return await search_products_for_agent(db, "", pet_type, limit)
+    try:
+        return await search_products_for_agent(db, "", pet_type, limit)
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_product_search_fallback_failed",
+            extra={
+                "stage": "product_search_fallback",
+                "session_id": session_id,
+                "user_id": user_id,
+                "query": "",
+                "pet_type": pet_type,
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return []
 
 
-async def _retrieve_rag_context(db: AsyncSession, user_id: int, query: str) -> tuple[str, str | None]:
+async def _retrieve_rag_context(db: AsyncSession, user_id: int, session_id: int, query: str) -> tuple[str, str | None]:
     try:
         private_results = await retrieve_private_knowledge(db, user_id, query, top_k=3, caller="guide_agent")
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_rag_failed",
+            extra={
+                "stage": "rag",
+                "session_id": session_id,
+                "user_id": user_id,
+                "query": query,
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
         private_results = []
     if not private_results:
         return "", None
@@ -148,28 +271,34 @@ def _pick_allowed_recommendations(
     picked: list[dict[str, Any]] = []
     seen_product_ids: set[int] = set()
     for item in raw_recommendations:
-        product_id = int(item.get("product_id") or 0)
+        product_id = _safe_int(item.get("product_id"))
+        if product_id is None:
+            continue
         if product_id not in products_by_id or product_id in seen_product_ids:
             continue
         product = products_by_id[product_id]
-        sku_id = item.get("sku_id")
+        sku_id = _safe_int(item.get("sku_id"))
         allowed_sku_ids = {
             int(sku["id"])
             for sku in product.get("skus") or []
             if sku.get("is_enabled", True) and int(sku.get("stock") or 0) > 0
         }
-        if sku_id is not None and int(sku_id) not in allowed_sku_ids:
+        if sku_id is not None and sku_id not in allowed_sku_ids:
             sku_id = None
         if sku_id is None and allowed_sku_ids:
             sku_id = sorted(allowed_sku_ids)[0]
+        source = str(item.get("source") or "product_search")
         picked.append(
             {
                 "product_id": product_id,
-                "sku_id": int(sku_id) if sku_id is not None else None,
+                "sku_id": sku_id,
                 "rank": len(picked) + 1,
                 "reason": str(item.get("reason") or "Matched the user's shopping request."),
                 "caution": item.get("caution"),
-                "source": str(item.get("source") or "product_search"),
+                "source": source,
+                "source_detail": item.get("source_detail") or ("rag_enhanced" if source == "rag_enhanced" else "llm_selected"),
+                "score": _safe_score(item.get("score")),
+                "matched_pet_fields": _json_list(item.get("matched_pet_fields")),
             }
         )
         seen_product_ids.add(product_id)
@@ -181,15 +310,73 @@ def _pick_allowed_recommendations(
 async def _hydrate_recommendations(
     db: AsyncSession,
     recommendations: list[dict[str, Any]],
+    *,
+    session_id: int,
+    user_id: int,
 ) -> list[dict[str, Any]]:
     hydrated: list[dict[str, Any]] = []
     for item in recommendations:
         try:
             product = await get_product_for_agent(db, item["product_id"])
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "guide_agent_recommendation_hydration_failed",
+                extra={
+                    "stage": "recommendation_hydration",
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "product_id": item.get("product_id"),
+                    "exception_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
             continue
         hydrated.append({**item, "product": product})
     return hydrated
+
+
+async def list_latest_guide_recommendations(
+    db: AsyncSession,
+    user: User,
+    session_id: int,
+) -> list[dict[str, Any]]:
+    await get_guide_session(db, user.id, session_id)
+    latest_message_id = await db.scalar(
+        select(AgentMessage.id)
+        .where(
+            AgentMessage.session_id == session_id,
+            AgentMessage.role == "assistant",
+        )
+        .order_by(AgentMessage.id.desc())
+        .limit(1)
+    )
+    if latest_message_id is None:
+        return []
+
+    result = await db.execute(
+        select(AgentRecommendation)
+        .where(
+            AgentRecommendation.session_id == session_id,
+            AgentRecommendation.message_id == latest_message_id,
+            AgentRecommendation.user_id == user.id,
+        )
+        .order_by(AgentRecommendation.rank, AgentRecommendation.id)
+    )
+    recommendations = [
+        {
+            "product_id": item.product_id,
+            "sku_id": item.sku_id,
+            "rank": item.rank,
+            "reason": item.reason,
+            "caution": item.caution,
+            "source": item.source,
+            "source_detail": item.source_detail,
+            "score": item.score,
+            "matched_pet_fields": _json_list(item.matched_pet_fields),
+        }
+        for item in result.scalars().all()
+    ]
+    return await _hydrate_recommendations(db, recommendations, session_id=session_id, user_id=user.id)
 
 
 async def send_guide_message(
@@ -206,15 +393,24 @@ async def send_guide_message(
         pet_summary = await get_pet_detail_summary(db, user.id, session.pet_id)
 
     pet_type = pet_summary.get("pet_type") if pet_summary else None
-    products = await _search_product_candidates(db, content, pet_type, limit)
-    rag_context, rag_references = await _retrieve_rag_context(db, user.id, content)
+    products = await _search_product_candidates(
+        db,
+        content,
+        pet_type,
+        limit,
+        session_id=session_id,
+        user_id=user.id,
+    )
+    rag_context, rag_references = await _retrieve_rag_context(db, user.id, session_id, content)
+    history_summary, recent_history = await _build_guide_history_context(session)
     workflow_result = await run_guide_agent_workflow(
         question=content,
         risk_level=risk_level,
         pet_summary=pet_summary,
         products=products,
         rag_context=rag_context,
-        history=_messages_to_history(session.messages),
+        history=recent_history,
+        history_summary=history_summary,
         session_id=session_id,
     )
     picked = _pick_allowed_recommendations(
@@ -222,7 +418,7 @@ async def send_guide_message(
         products,
         limit,
     )
-    hydrated = await _hydrate_recommendations(db, picked)
+    hydrated = await _hydrate_recommendations(db, picked, session_id=session_id, user_id=user.id)
 
     user_message = AgentMessage(
         session_id=session_id,
@@ -252,6 +448,9 @@ async def send_guide_message(
                 reason=item["reason"],
                 caution=item.get("caution"),
                 source=item.get("source") or "product_search",
+                source_detail=item.get("source_detail"),
+                score=item.get("score"),
+                matched_pet_fields=_json_dumps_list(item.get("matched_pet_fields")),
             )
         )
 

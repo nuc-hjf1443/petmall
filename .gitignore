@@ -17,3 +17,5 @@ frontend/unpackage/
 frontend/node_modules/
 
 *.log
+
+backend/scripts/seed_a_test_data.py

@@ -1,11 +1,15 @@
+import logging
 from functools import lru_cache
+import logging
 from typing import Any, TypedDict
 
 from settings.config import get_settings
 
 
-MEDICAL_SAFETY_TEXT = "以下内容仅供参考，不能替代兽医诊断。"
-HIGH_RISK_TEXT = "你描述的情况可能存在急症风险，请尽快联系线下兽医或宠物医院。"
+logger = logging.getLogger(__name__)
+
+MEDICAL_SAFETY_TEXT = "小提醒：以下内容只适合做日常参考，不能替代兽医诊断。"
+HIGH_RISK_TEXT = "你描述的情况可能有急症风险，请尽快联系线下兽医或宠物医院。"
 
 
 class QaWorkflowState(TypedDict, total=False):
@@ -24,12 +28,16 @@ class GuideRecommendationState(TypedDict, total=False):
     reason: str
     caution: str | None
     source: str
+    source_detail: str | None
+    score: float | None
+    matched_pet_fields: list[str]
 
 
 class GuideWorkflowState(TypedDict, total=False):
     question: str
     risk_level: str
     history: list[dict[str, str]]
+    history_summary: str
     rag_context: str
     pet_summary: dict[str, Any] | None
     products: list[dict[str, Any]]
@@ -38,34 +46,40 @@ class GuideWorkflowState(TypedDict, total=False):
     references: str | None
 
 
-GUIDE_MEDICAL_SAFETY_TEXT = (
-    "Medical, medication, prescription diet, or emergency content is for reference only "
-    "and cannot replace a veterinarian diagnosis."
-)
-GUIDE_HIGH_RISK_TEXT = "For possible emergency symptoms, contact an offline veterinarian as soon as possible."
+GUIDE_MEDICAL_SAFETY_TEXT = "涉及医疗、用药、处方粮或急症内容时，以下建议仅供参考，不能替代兽医诊断。"
+GUIDE_HIGH_RISK_TEXT = "你描述的情况可能存在急症风险，请尽快联系线下兽医或宠物医院。"
 
 
 def build_rule_based_qa_answer(risk_level: str) -> str:
-    base = "我会先根据你提供的信息给出日常养宠建议。"
+    base = "我先按你提供的信息，给一份温和版的日常养宠建议。"
     if risk_level == "high":
-        return f"{base} {HIGH_RISK_TEXT}{MEDICAL_SAFETY_TEXT}"
+        return f"{base}\n\n{HIGH_RISK_TEXT}\n\n{MEDICAL_SAFETY_TEXT}"
     if risk_level == "medical":
         return (
-            f"{base} 涉及医疗、用药、疫苗或驱虫时，{MEDICAL_SAFETY_TEXT}"
-            "不要自行使用处方药或调整剂量。"
+            f"{base}\n\n{MEDICAL_SAFETY_TEXT}\n\n"
+            "建议：不要自行使用处方药或调整剂量，先记录症状、饮食和精神状态，再给兽医判断。"
         )
-    return f"{base} 当前问题暂未命中医疗高风险规则，后续可接入平台知识库和私人知识库后给出更具体回答。"
+    return (
+        f"{base}\n\n"
+        "建议：\n"
+        "1. 先观察宝贝的精神、食欲、排便和饮水变化。\n"
+        "2. 如果症状持续或加重，及时联系兽医会更安心。\n"
+        "3. 你也可以补充年龄、品种、体重和最近变化，我再帮你细化。"
+    )
 
 
 def _build_system_prompt(risk_level: str, has_rag_context: bool) -> str:
     rag_instruction = (
-        "已提供 RAG 检索摘要时，可以基于摘要回答，但不能夸大为完整诊断；"
+        "已提供 RAG 检索摘要时，可以基于摘要回答，但不能夸大成完整诊断。"
         if has_rag_context
         else "当前没有可用 RAG 检索摘要，不能声称引用了私人知识库、平台知识库或宠物档案。"
     )
     return (
         "你是宠物综合服务平台的养宠知识问答助手。"
-        "请用中文回答，表达清晰、谨慎、可执行。"
+        "请用中文回答，语气要温柔、生动、可亲近，像耐心陪用户一起照顾宠物的小助手。"
+        "可以轻微可爱，但不要过度卖萌；医疗、支付、订单等严肃场景要稳重。"
+        "输出格式只使用普通段落和 1. 2. 3. 编号，不使用 Markdown 标题、表格、分割线、粗体、代码块或大量 emoji。"
+        "优先先给结论，再给简短建议。每次回答尽量控制在 4 段以内。"
         f"{rag_instruction}"
         "不知道时要说明信息不足，不要编造诊断、药品剂量、检查结果或平台不存在的数据。"
         f"当前风险等级：{risk_level}。"
@@ -192,6 +206,25 @@ async def _run_graph_without_checkpointer(
     return await graph.ainvoke(state, config=config)
 
 
+def get_agent_memory_status() -> dict[str, Any]:
+    settings = get_settings()
+    configured = bool(settings.agent_memory_postgres_dsn)
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # noqa: F401
+
+        dependency_available = True
+    except ImportError:
+        dependency_available = False
+    return {
+        "provider": "postgres",
+        "configured": configured,
+        "enabled": configured and dependency_available,
+        "dependency_available": dependency_available,
+        "setup_on_start": settings.agent_memory_setup_on_start,
+        "thread_id_pattern": "qa_session:{session_id}",
+    }
+
+
 async def _run_graph_with_postgres_checkpointer(
     state: QaWorkflowState,
     session_id: int,
@@ -202,6 +235,7 @@ async def _run_graph_with_postgres_checkpointer(
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     except ImportError:
+        logger.warning("LangGraph postgres checkpointer dependency is not installed")
         return None
 
     try:
@@ -210,7 +244,8 @@ async def _run_graph_with_postgres_checkpointer(
                 await checkpointer.setup()
             graph = _build_qa_graph().compile(checkpointer=checkpointer)
             return await graph.ainvoke(state, config=_build_thread_config(session_id))
-    except Exception:
+    except Exception as exc:
+        logger.warning("LangGraph postgres checkpoint failed for qa session %s: %s", session_id, exc)
         return None
 
 
@@ -255,28 +290,54 @@ def _build_guide_recommendations(
     products: list[dict[str, Any]],
     limit: int,
     rag_context: str | None,
+    pet_summary: dict[str, Any] | None = None,
 ) -> list[GuideRecommendationState]:
     recommendations: list[GuideRecommendationState] = []
     for product in products[:limit]:
         sku = _first_in_stock_sku(product)
         if sku is None:
             continue
+        matched_pet_fields = _matched_pet_fields(product, pet_summary)
+        source = "rag_enhanced" if rag_context else "product_search"
         recommendations.append(
             {
                 "product_id": int(product["id"]),
                 "sku_id": int(sku["id"]),
                 "rank": len(recommendations) + 1,
-                "reason": "Matched the current pet profile and the user's shopping request.",
-                "caution": "Check ingredients, size, and transition gradually when changing food.",
-                "source": "rag_enhanced" if rag_context else "product_search",
+                "reason": "匹配当前宠物档案和本次导购需求。",
+                "caution": "下单前请确认规格、成分和适用对象；换粮时建议逐步过渡。",
+                "source": source,
+                "source_detail": "rag_enhanced" if rag_context else "rule_based_ranked",
+                "score": 0.75 if matched_pet_fields else 0.6,
+                "matched_pet_fields": matched_pet_fields,
             }
         )
     return recommendations
 
 
+def _matched_pet_fields(product: dict[str, Any], pet_summary: dict[str, Any] | None) -> list[str]:
+    if not pet_summary:
+        return []
+    matched: list[str] = []
+    product_pet_type = product.get("applicable_pet_type")
+    if pet_summary.get("pet_type") and product_pet_type == pet_summary.get("pet_type"):
+        matched.append("pet_type")
+    searchable_text = f"{product.get('title') or ''} {product.get('description') or ''}".lower()
+    field_keywords = {
+        "allergy_notes": ["低敏", "敏感", "allergy", "sensitive"],
+        "diet_preference": ["粮", "food", "diet", "鸡肉", "牛肉", "鱼"],
+        "product_preference": ["玩具", "牵引", "猫砂", "用品"],
+    }
+    for field, keywords in field_keywords.items():
+        value = str(pet_summary.get(field) or "").strip()
+        if value and any(keyword.lower() in searchable_text or keyword.lower() in value.lower() for keyword in keywords):
+            matched.append(field)
+    return matched
+
+
 def _build_pet_summary_text(pet_summary: dict[str, Any] | None) -> str:
     if not pet_summary:
-        return "No pet profile was selected."
+        return "未选择宠物档案。"
     fields = [
         f"name={pet_summary.get('name')}",
         f"type={pet_summary.get('pet_type')}",
@@ -301,12 +362,68 @@ def _build_products_text(products: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def build_rule_based_guide_history_summary(
+    existing_summary: str | None,
+    history: list[dict[str, str]],
+    *,
+    max_chars: int = 1200,
+) -> str:
+    parts = []
+    if existing_summary:
+        parts.append(f"既有摘要：{existing_summary.strip()}")
+    if history:
+        lines = []
+        for item in history[-12:]:
+            role = item.get("role", "unknown")
+            content = str(item.get("content", "")).strip().replace("\n", " ")
+            if content:
+                lines.append(f"{role}: {content[:180]}")
+        if lines:
+            parts.append("历史要点：" + "；".join(lines))
+    summary = "\n".join(parts).strip()
+    return summary[:max_chars]
+
+
+async def summarize_guide_history(
+    *,
+    existing_summary: str | None,
+    history: list[dict[str, str]],
+    max_chars: int = 1200,
+) -> str:
+    settings = get_settings()
+    if settings.llm_provider != "deepseek" or not settings.llm_api_key:
+        return build_rule_based_guide_history_summary(existing_summary, history, max_chars=max_chars)
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_deepseek import ChatDeepSeek
+    except ImportError:
+        return build_rule_based_guide_history_summary(existing_summary, history, max_chars=max_chars)
+
+    llm = ChatDeepSeek(
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        temperature=0,
+    )
+    history_text = _normalize_history(history)
+    response = await llm.ainvoke(
+        [
+            SystemMessage(content="你是宠物导购会话摘要器。请保留用户需求、宠物信息、预算、偏好和已推荐方向，输出简短中文摘要，不要编造。"),
+            HumanMessage(content=f"既有摘要：{existing_summary or ''}\n\n需要合并的历史：\n{history_text}"),
+        ]
+    )
+    content = getattr(response, "content", None)
+    if isinstance(content, str) and content.strip():
+        return content.strip()[:max_chars]
+    return build_rule_based_guide_history_summary(existing_summary, history, max_chars=max_chars)
+
+
 async def _call_deepseek_guide(
     question: str,
     risk_level: str,
     pet_summary: dict[str, Any] | None,
     products: list[dict[str, Any]],
     history: list[dict[str, str]] | None,
+    history_summary: str | None,
     rag_context: str | None,
 ) -> str | None:
     settings = get_settings()
@@ -330,6 +447,7 @@ async def _call_deepseek_guide(
         f"Pet profile: {_build_pet_summary_text(pet_summary)}\n"
         f"Candidate products:\n{_build_products_text(products)}\n"
         f"RAG context:\n{rag_context or ''}\n"
+        f"Conversation summary:\n{history_summary or ''}\n"
         f"Recent history:\n{_normalize_history(history)}\n"
         f"User question: {question}"
     )
@@ -356,15 +474,15 @@ def build_rule_based_guide_answer(
     pet_summary: dict[str, Any] | None,
 ) -> str:
     if not products:
-        answer = "No matching on-sale products are available right now. Please refine the need or try another category."
+        answer = "暂时没有匹配到可售商品。你可以补充宠物类型、年龄、预算或换一个品类再试。"
     else:
         pet_part = ""
         if pet_summary:
             pet_name = pet_summary.get("name")
             pet_type = pet_summary.get("pet_type")
-            pet_part = f" for {pet_name or 'the selected pet'} ({pet_type or 'pet'})"
+            pet_part = f"，结合{pet_name or '所选宠物'}（{pet_type or '宠物'}）的档案"
         titles = ", ".join(str(product.get("title")) for product in products[:3] if product.get("title"))
-        answer = f"Based on the current pet profile{pet_part}, the available product candidates are: {titles}."
+        answer = f"我从当前在售商品中{pet_part}为你筛选了这些候选商品：{titles}。推荐结果会以商品卡片为准，价格和库存以商城数据为准。"
     if risk_level == "high":
         return f"{answer}\n\n{GUIDE_HIGH_RISK_TEXT} {GUIDE_MEDICAL_SAFETY_TEXT}"
     if risk_level == "medical":
@@ -374,9 +492,9 @@ def build_rule_based_guide_answer(
 
 def _enforce_guide_safety(answer: str, risk_level: str) -> str:
     result = answer.strip()
-    if risk_level in {"medical", "high"} and "cannot replace a veterinarian diagnosis" not in result:
+    if risk_level in {"medical", "high"} and "不能替代兽医诊断" not in result:
         result = f"{result}\n\n{GUIDE_MEDICAL_SAFETY_TEXT}"
-    if risk_level == "high" and "offline veterinarian" not in result:
+    if risk_level == "high" and "宠物医院" not in result and "兽医" not in result:
         result = f"{result}\n\n{GUIDE_HIGH_RISK_TEXT}"
     return result
 
@@ -389,6 +507,7 @@ async def run_guide_agent_workflow(
     products: list[dict[str, Any]] | None = None,
     rag_context: str | None = None,
     history: list[dict[str, str]] | None = None,
+    history_summary: str | None = None,
     session_id: int | None = None,
 ) -> GuideWorkflowState:
     product_candidates = products or []
@@ -399,9 +518,19 @@ async def run_guide_agent_workflow(
             pet_summary,
             product_candidates,
             history,
+            history_summary,
             rag_context,
         )
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_llm_failed",
+            extra={
+                "stage": "llm",
+                "session_id": session_id,
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
         answer = None
     if answer is None:
         answer = build_rule_based_guide_answer(risk_level, product_candidates, pet_summary)
@@ -409,6 +538,7 @@ async def run_guide_agent_workflow(
         "question": question,
         "risk_level": risk_level,
         "history": history or [],
+        "history_summary": history_summary or "",
         "rag_context": rag_context or "",
         "pet_summary": pet_summary,
         "products": product_candidates,
@@ -417,6 +547,7 @@ async def run_guide_agent_workflow(
             product_candidates,
             len(product_candidates),
             rag_context,
+            pet_summary,
         ),
         "references": _build_references(rag_context),
     }

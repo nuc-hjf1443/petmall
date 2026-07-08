@@ -11,6 +11,7 @@ class QaSessionCreate(BaseModel):
 
 class QaMessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
+    async_mode: bool = False
 
 
 class GuideSessionCreate(BaseModel):
@@ -48,10 +49,33 @@ class AgentSessionResponse(BaseModel):
     updated_at: datetime
 
 
+class AgentSessionListItem(BaseModel):
+    id: int
+    agent_type: str
+    title: str | None = None
+    pet_id: int | None = None
+    last_message: str | None = None
+    last_role: str | None = None
+    is_pending: bool = False
+    latest_message_content: str | None = None
+    latest_message_at: datetime | None = None
+    message_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentSessionListResponse(BaseModel):
+    items: list[AgentSessionListItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class QaAnswerResponse(BaseModel):
     session_id: int
     user_message: AgentMessageResponse
-    assistant_message: AgentMessageResponse
+    assistant_message: AgentMessageResponse | None = None
+    status: str = "completed"
 
 
 class GuideRecommendationResponse(BaseModel):
@@ -60,6 +84,10 @@ class GuideRecommendationResponse(BaseModel):
     rank: int
     reason: str
     caution: str | None = None
+    source: str | None = None
+    source_detail: str | None = None
+    score: float | None = None
+    matched_pet_fields: list[str] = Field(default_factory=list)
     product: dict[str, Any]
 
 

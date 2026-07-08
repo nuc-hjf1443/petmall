@@ -27,6 +27,7 @@
 - 迁移：Alembic
 - 智能体：LangChain、LangGraph、DeepSeek
 - RAG：ChromaDB、Ollama `nomic-embed-text`、PyPDF
+- AI 助手记忆：MySQL 保存用户可见会话记录，PostgreSQL + LangGraph checkpoint 保存 QA 工作流状态
 - 支付：本地 mock 支付、支付宝沙箱支付
 - 部署模板：Docker、docker-compose、Nginx
 
@@ -69,7 +70,14 @@ python -m uvicorn main:app --reload
 - API 根路径：`http://127.0.0.1:8000/`
 - FastAPI 文档：`http://127.0.0.1:8000/docs`
 
-完整 Agent/RAG 能力还需要准备 MySQL、Redis、RabbitMQ、Ollama、DeepSeek API。启用 LangGraph 多轮记忆时，还需要 PostgreSQL。
+完整 Agent/RAG 能力还需要准备 MySQL、Redis、RabbitMQ、Ollama、DeepSeek API。启用 LangGraph checkpoint 记忆时，还需要 PostgreSQL，并配置：
+
+```text
+PETMALL_AGENT_MEMORY_POSTGRES_DSN=postgresql://petmall:change_me@127.0.0.1:5432/petmall_agent
+PETMALL_AGENT_MEMORY_SETUP_ON_START=true
+```
+
+其中 MySQL 的 `agent_session` / `agent_message` 仍负责用户可见聊天历史；PostgreSQL checkpoint 只用于 AI 养宠助手的 LangGraph 内部状态，QA 会话使用 `qa_session:{session_id}` 作为 `thread_id`。AI 导购模块不接入本次 checkpoint 改动。
 
 知识库 worker 独立启动：
 

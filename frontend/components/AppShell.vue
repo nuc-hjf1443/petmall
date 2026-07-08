@@ -93,9 +93,9 @@ export default {
 				{ key: 'mall', label: '商城', icon: '▣', path: '/pages/mall/index' },
 				{ key: 'adoption', label: '领养', icon: '♡', path: '/pages/adoption/index' },
 				{ key: 'community', label: '社区', icon: '◌', path: '/pages/community/index' },
-				{ key: 'profile', label: '我的', icon: '♙', path: '/pages/profile/index' },
 				{ key: 'guide', label: 'AI 导购', icon: '', path: '/pages/agent/guide' },
-				{ key: 'agent', label: 'AI 助手', icon: '', path: '/pages/agent/chat' }
+				{ key: 'agent', label: 'AI 助手', icon: '', path: '/pages/agent/chat' },
+				{ key: 'profile', label: '我的', icon: '♙', path: '/pages/profile/index' }
 			]
 		}
 	},
