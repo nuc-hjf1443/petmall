@@ -1,8 +1,11 @@
 from functools import lru_cache
+import logging
 from typing import Any, TypedDict
 
 from settings.config import get_settings
 
+
+logger = logging.getLogger(__name__)
 
 MEDICAL_SAFETY_TEXT = "以下内容仅供参考，不能替代兽医诊断。"
 HIGH_RISK_TEXT = "你描述的情况可能存在急症风险，请尽快联系线下兽医或宠物医院。"
@@ -192,6 +195,25 @@ async def _run_graph_without_checkpointer(
     return await graph.ainvoke(state, config=config)
 
 
+def get_agent_memory_status() -> dict[str, Any]:
+    settings = get_settings()
+    configured = bool(settings.agent_memory_postgres_dsn)
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # noqa: F401
+
+        dependency_available = True
+    except ImportError:
+        dependency_available = False
+    return {
+        "provider": "postgres",
+        "configured": configured,
+        "enabled": configured and dependency_available,
+        "dependency_available": dependency_available,
+        "setup_on_start": settings.agent_memory_setup_on_start,
+        "thread_id_pattern": "qa_session:{session_id}",
+    }
+
+
 async def _run_graph_with_postgres_checkpointer(
     state: QaWorkflowState,
     session_id: int,
@@ -202,6 +224,7 @@ async def _run_graph_with_postgres_checkpointer(
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     except ImportError:
+        logger.warning("LangGraph postgres checkpointer dependency is not installed")
         return None
 
     try:
@@ -210,7 +233,8 @@ async def _run_graph_with_postgres_checkpointer(
                 await checkpointer.setup()
             graph = _build_qa_graph().compile(checkpointer=checkpointer)
             return await graph.ainvoke(state, config=_build_thread_config(session_id))
-    except Exception:
+    except Exception as exc:
+        logger.warning("LangGraph postgres checkpoint failed for qa session %s: %s", session_id, exc)
         return None
 
 

@@ -7,6 +7,15 @@ export const aiApi = {
 		data,
 		auth: true
 	}),
+	listQaSessions: () => request({
+		url: '/agents/qa/sessions',
+		auth: true
+	}),
+	deleteQaSession: sessionId => request({
+		url: `/agents/qa/sessions/${sessionId}`,
+		method: 'DELETE',
+		auth: true
+	}),
 	sendQaMessage: (sessionId, data) => request({
 		url: `/agents/qa/sessions/${sessionId}/messages`,
 		method: 'POST',
@@ -34,8 +43,12 @@ export const aiApi = {
 // 保留现有页面使用的方法名。
 export const agentApi = {
 	createSession: (data = {}) => aiApi.createQaSession(data),
-	send: (sessionId, content) => aiApi.sendQaMessage(sessionId, { content }),
+	listSessions: aiApi.listQaSessions,
+	deleteSession: aiApi.deleteQaSession,
+	send: (sessionId, content, asyncMode = false) => aiApi.sendQaMessage(sessionId, { content, async_mode: asyncMode }),
 	createQaSession: aiApi.createQaSession,
+	listQaSessions: aiApi.listQaSessions,
+	deleteQaSession: aiApi.deleteQaSession,
 	sendQaMessage: aiApi.sendQaMessage,
 	createGuideSession: aiApi.createGuideSession,
 	sendGuideMessage: aiApi.sendGuideMessage,
