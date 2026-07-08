@@ -155,3 +155,112 @@ async def test_admin_report_resolution_state_and_duplicate_guard(test_context, s
         )).scalars().all()
     assert len(logs) == 1
     assert logs[0].action == "take_down"
+
+
+async def test_comment_reply_parent_validation(test_context, strong_password):
+    client = test_context["client"]
+    cache = test_context["cache"]
+    token_a = await register(client, cache, "13930000021", strong_password)
+    token_b = await register(client, cache, "13930000022", strong_password)
+
+    post_a = await client.post("/posts", headers=auth(token_a), data={"content": "first"})
+    post_b = await client.post("/posts", headers=auth(token_a), data={"content": "second"})
+    assert post_a.status_code == 200, post_a.text
+    assert post_b.status_code == 200, post_b.text
+    post_a_id = post_a.json()["id"]
+    post_b_id = post_b.json()["id"]
+
+    parent = await client.post(
+        f"/posts/{post_a_id}/comments",
+        headers=auth(token_b),
+        json={"content": "parent comment"},
+    )
+    assert parent.status_code == 200, parent.text
+    parent_id = parent.json()["id"]
+
+    reply = await client.post(
+        f"/posts/{post_a_id}/comments",
+        headers=auth(token_a),
+        json={"content": "reply comment", "parent_id": parent_id},
+    )
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["parent_id"] == parent_id
+
+    cross_post = await client.post(
+        f"/posts/{post_b_id}/comments",
+        headers=auth(token_a),
+        json={"content": "bad reply", "parent_id": parent_id},
+    )
+    assert cross_post.status_code == 400
+
+    await client.delete(f"/posts/{post_a_id}/comments/{parent_id}", headers=auth(token_b))
+    deleted_parent = await client.post(
+        f"/posts/{post_a_id}/comments",
+        headers=auth(token_a),
+        json={"content": "bad reply after delete", "parent_id": parent_id},
+    )
+    assert deleted_parent.status_code == 400
+
+
+async def test_post_list_can_filter_by_topic(test_context, strong_password):
+    client = test_context["client"]
+    cache = test_context["cache"]
+    token = await register(client, cache, "13930000031", strong_password)
+    liker_token = await register(client, cache, "13930000032", strong_password)
+
+    topics = await client.get("/topics")
+    assert topics.status_code == 200, topics.text
+    cat_topic = next(item for item in topics.json() if item["name"] == "猫咪")
+    dog_topic = next(item for item in topics.json() if item["name"] == "狗狗")
+
+    cat_post = await client.post(
+        "/posts",
+        headers=auth(token),
+        data={"content": "cat post", "topic_ids": f"[{cat_topic['id']}]"},
+    )
+    dog_post = await client.post(
+        "/posts",
+        headers=auth(token),
+        data={"content": "dog post", "topic_ids": f"[{dog_topic['id']}]"},
+    )
+    other_post = await client.post(
+        "/posts",
+        headers=auth(token),
+        data={"content": "other post"},
+    )
+    name_post = await client.post(
+        "/posts",
+        headers=auth(token),
+        data={"content": "name topic post", "topic_names": '["养宠经验"]'},
+    )
+    assert cat_post.status_code == 200, cat_post.text
+    assert dog_post.status_code == 200, dog_post.text
+    assert other_post.status_code == 200, other_post.text
+    assert name_post.status_code == 200, name_post.text
+
+    cat_posts = await client.get(f"/posts?topic_id={cat_topic['id']}")
+    assert cat_posts.status_code == 200, cat_posts.text
+    assert [item["content"] for item in cat_posts.json()] == ["cat post"]
+
+    name_posts = await client.get("/posts?topic_name=养宠经验")
+    assert name_posts.status_code == 200, name_posts.text
+    assert [item["content"] for item in name_posts.json()] == ["name topic post"]
+
+    other_posts = await client.get("/posts?topic_scope=other")
+    assert other_posts.status_code == 200, other_posts.text
+    assert [item["content"] for item in other_posts.json()] == ["other post"]
+
+    liked = await client.post(f"/posts/{cat_post.json()['id']}/likes", headers=auth(liker_token))
+    assert liked.status_code == 200, liked.text
+
+    latest_posts = await client.get("/posts?sort=latest")
+    assert latest_posts.status_code == 200, latest_posts.text
+    assert latest_posts.json()[0]["content"] == "name topic post"
+
+    recommended_posts = await client.get("/posts?sort=recommend")
+    assert recommended_posts.status_code == 200, recommended_posts.text
+    assert recommended_posts.json()[0]["content"] == "cat post"
+
+    all_posts = await client.get("/posts")
+    assert all_posts.status_code == 200, all_posts.text
+    assert {item["content"] for item in all_posts.json()} >= {"cat post", "dog post", "other post", "name topic post"}

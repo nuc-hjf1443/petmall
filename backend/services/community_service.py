@@ -10,10 +10,12 @@ from core.errors import bad_request, conflict, forbidden, not_found
 from models.community import Follow, Post, PostComment, PostFavorite, PostLike, PostMedia, PostStatus, Report
 from models.user import User
 from repository.community_repository import (
+    ensure_topics,
     get_comment,
     get_follow,
     get_interaction,
     get_report,
+    get_topic_by_name,
     get_topics,
     get_visible_post,
     interaction_counts,
@@ -24,6 +26,7 @@ from schemas.community_schema import CommentCreate, CommentResponse, PageResult,
 from settings.config import get_settings
 
 
+DEFAULT_TOPIC_NAMES = ["猫咪", "狗狗", "领养故事", "养宠经验"]
 IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 VIDEO_TYPES = {"video/mp4": ".mp4"}
 
@@ -73,8 +76,26 @@ def _parse_topic_ids(raw: str | None) -> list[int]:
     return ids
 
 
+def _parse_topic_names(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw)
+        names = [str(value).strip() for value in values if str(value).strip()]
+    except (TypeError, json.JSONDecodeError):
+        raise bad_request("topic_names must be a JSON string array")
+    if len(names) != len(set(names)):
+        raise bad_request("Duplicate topic name")
+    return names
+
+
 async def create_post(
-    db: AsyncSession, user_id: int, content: str | None, topic_ids_raw: str | None, files: list[UploadFile]
+    db: AsyncSession,
+    user_id: int,
+    content: str | None,
+    topic_ids_raw: str | None,
+    files: list[UploadFile],
+    topic_names_raw: str | None = None,
 ) -> PostResponse:
     content = content.strip() if content else None
     if not content and not files:
@@ -90,9 +111,18 @@ async def create_post(
         if Path(upload.filename or "").suffix.lower() != expected:
             raise bad_request("Media extension does not match MIME type")
     topic_ids = _parse_topic_ids(topic_ids_raw)
+    topic_names = _parse_topic_names(topic_names_raw)
     topics = await get_topics(db, topic_ids) if topic_ids else []
     if len(topics) != len(topic_ids):
         raise bad_request("Topic not found or disabled")
+    if topic_names:
+        available_topics = await ensure_topics(db, topic_names)
+        topic_by_name = {topic.name: topic for topic in available_topics}
+        missing_names = [name for name in topic_names if name not in topic_by_name]
+        if missing_names:
+            raise bad_request("Topic not found or disabled")
+        topics.extend(topic_by_name[name] for name in topic_names)
+    topics = list({topic.id: topic for topic in topics}.values())
 
     settings = get_settings()
     directory = settings.public_asset_path / "community" / str(user_id)
@@ -127,8 +157,38 @@ async def create_post(
         raise
 
 
-async def get_posts(db: AsyncSession, page: int, page_size: int, current_user_id: int | None = None) -> list[PostResponse]:
-    return [await _post_response(db, post, current_user_id) for post in await list_visible_posts(db, page, page_size)]
+async def get_posts(
+    db: AsyncSession,
+    page: int,
+    page_size: int,
+    current_user_id: int | None = None,
+    topic_id: int | None = None,
+    topic_name: str | None = None,
+    topic_scope: str | None = None,
+    sort: str = "latest",
+) -> list[PostResponse]:
+    if topic_id is None and topic_name:
+        topic = await get_topic_by_name(db, topic_name.strip())
+        if topic is None:
+            return []
+        topic_id = topic.id
+    exclude_topic_names = DEFAULT_TOPIC_NAMES if topic_scope == "other" else None
+    return [
+        await _post_response(db, post, current_user_id)
+        for post in await list_visible_posts(
+            db,
+            page,
+            page_size,
+            topic_id,
+            exclude_topic_names=exclude_topic_names,
+            sort=sort if sort == "recommend" else "latest",
+        )
+    ]
+
+
+async def get_enabled_topics(db: AsyncSession) -> list[TopicResponse]:
+    topics = await ensure_topics(db, DEFAULT_TOPIC_NAMES)
+    return [TopicResponse.model_validate(topic, from_attributes=True) for topic in topics]
 
 
 async def get_post(db: AsyncSession, post_id: int, current_user_id: int | None = None) -> PostResponse:

@@ -2,9 +2,11 @@ from pathlib import Path
 
 import pytest
 
+from core.auth import create_access_token, hash_password
 from core.knowledge_queue import get_knowledge_task_publisher
 from core.rag_service import retrieve_platform_knowledge, retrieve_private_knowledge
 from models.knowledge import KnowledgeDocument, KnowledgeTask
+from models.user import User
 from services.knowledge_service import (
     create_platform_knowledge_document,
     get_pet_profile_document_adapter,
@@ -123,5 +125,120 @@ async def test_knowledge_isolation_index_and_delete(test_context, strong_passwor
                 for _, metadata in vectors.values.values()
             )
         assert not list((settings.private_asset_path / "knowledge" / "1").glob("*.txt"))
+    finally:
+        settings.generated_asset_dir = original
+
+
+async def test_admin_platform_knowledge_document_lifecycle(
+    test_context, strong_password, tmp_path
+):
+    client = test_context["client"]
+    publisher = FakePublisher()
+    client._transport.app.dependency_overrides[get_knowledge_task_publisher] = lambda: publisher
+    settings = get_settings()
+    original = settings.generated_asset_dir
+    settings.generated_asset_dir = str(tmp_path)
+    try:
+        async with test_context["session_factory"]() as db:
+            admin = User(
+                phone="13940000100",
+                password_hash=hash_password(strong_password),
+                is_admin=True,
+            )
+            normal = User(
+                phone="13940000101",
+                password_hash=hash_password(strong_password),
+            )
+            db.add_all([admin, normal])
+            await db.commit()
+            await db.refresh(admin)
+            await db.refresh(normal)
+            admin_token = create_access_token(admin.id, admin.token_version)
+            normal_token = create_access_token(normal.id, normal.token_version)
+
+        forbidden = await client.get(
+            "/admin/knowledge/platform/documents",
+            headers=auth(normal_token),
+        )
+        assert forbidden.status_code == 403
+
+        kb = await client.get("/admin/knowledge/platform", headers=auth(admin_token))
+        assert kb.status_code == 200, kb.text
+        assert kb.json()["scope"] == "platform"
+
+        uploaded = await client.post(
+            "/admin/knowledge/platform/documents",
+            headers=auth(admin_token),
+            files={"file": ("platform.txt", "first platform feeding guide", "text/plain")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        document_id = uploaded.json()["id"]
+        assert uploaded.json()["source_type"] == "platform_upload"
+        assert publisher.task_ids
+
+        vectors = FakeVectors()
+        async with test_context["session_factory"]() as db:
+            await process_knowledge_task(db, publisher.task_ids[-1], vectors)
+            results = await retrieve_platform_knowledge(db, "feeding", vector_service=vectors)
+            assert results
+            assert results[0]["metadata"]["document_id"] == document_id
+            assert results[0]["metadata"]["scope"] == "platform"
+            await db.commit()
+
+        listed = await client.get(
+            "/admin/knowledge/platform/documents",
+            headers=auth(admin_token),
+        )
+        assert listed.status_code == 200, listed.text
+        assert [item["id"] for item in listed.json()] == [document_id]
+
+        replaced = await client.put(
+            f"/admin/knowledge/platform/documents/{document_id}",
+            headers=auth(admin_token),
+            files={"file": ("platform-v2.txt", "second platform hydration guide", "text/plain")},
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert replaced.json()["index_version"] == 2
+        assert replaced.json()["file_name"] == "platform-v2.txt"
+
+        async with test_context["session_factory"]() as db:
+            await process_knowledge_task(db, publisher.task_ids[-1], vectors)
+            results = await retrieve_platform_knowledge(db, "hydration", vector_service=vectors)
+            assert results
+            assert "second platform hydration guide" in results[0]["content"]
+            assert all("first platform feeding guide" not in value[0] for value in vectors.values.values())
+            await db.commit()
+
+        private_token = await register(client, test_context["cache"], "13940000102", strong_password)
+        private_kb = await client.post(
+            "/knowledge-bases",
+            headers=auth(private_token),
+            json={"name": "private"},
+        )
+        private_upload = await client.post(
+            f"/knowledge-bases/{private_kb.json()['id']}/documents",
+            headers=auth(private_token),
+            files={"file": ("private.txt", "private only", "text/plain")},
+        )
+        assert private_upload.status_code == 200, private_upload.text
+        wrong_scope = await client.post(
+            f"/admin/knowledge/platform/documents/{private_upload.json()['id']}/reindex",
+            headers=auth(admin_token),
+        )
+        assert wrong_scope.status_code == 404
+
+        deleted = await client.delete(
+            f"/admin/knowledge/platform/documents/{document_id}",
+            headers=auth(admin_token),
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["message"] == "Platform document deletion scheduled"
+
+        async with test_context["session_factory"]() as db:
+            await process_knowledge_task(db, publisher.task_ids[-1], vectors)
+            assert await retrieve_platform_knowledge(db, "hydration", vector_service=vectors) == []
+            assert await db.get(KnowledgeDocument, document_id) is None
+            await db.commit()
+        assert not list((settings.private_asset_path / "knowledge" / "platform").glob("*.txt"))
     finally:
         settings.generated_asset_dir = original

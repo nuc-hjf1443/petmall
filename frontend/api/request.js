@@ -176,6 +176,7 @@ export function request({
 
 export function upload({
 	url,
+	method = 'POST',
 	filePath,
 	files,
 	name = 'file',
@@ -193,6 +194,7 @@ export function upload({
 	return new Promise((resolve, reject) => {
 		const options = {
 			url: fullUrl,
+			method,
 			name,
 			formData,
 			header: {

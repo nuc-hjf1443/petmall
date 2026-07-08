@@ -21,5 +21,6 @@ export {
 	upload
 } from './request'
 export { systemApi } from './system'
+export { supportApi } from './support'
 export { userApi } from './user'
 export { walletApi } from './wallet'

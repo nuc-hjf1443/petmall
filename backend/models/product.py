@@ -172,6 +172,19 @@ class ProductReview(Base, TimestampMixin):
     sku: Mapped[ProductSku] = relationship(lazy="selectin")
 
 
+class ProductFavorite(Base, TimestampMixin):
+    __tablename__ = "product_favorite"
+    __table_args__ = (
+        UniqueConstraint("user_id", "product_id", name="uq_product_favorite_user_product"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), index=True, nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("product.id"), index=True, nullable=False)
+
+    product: Mapped[Product] = relationship(lazy="selectin")
+
+
 class CartItem(Base, TimestampMixin):
     __tablename__ = "cart_item"
     __table_args__ = (

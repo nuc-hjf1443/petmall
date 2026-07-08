@@ -51,3 +51,14 @@ class MerchantStaff(Base, TimestampMixin):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), index=True, nullable=False)
     role: Mapped[str] = mapped_column(String(32), default="owner", nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+
+class MerchantFollow(Base, TimestampMixin):
+    __tablename__ = "merchant_follow"
+    __table_args__ = (
+        UniqueConstraint("user_id", "merchant_id", name="uq_merchant_follow_user_merchant"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), index=True, nullable=False)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchant.id"), index=True, nullable=False)

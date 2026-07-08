@@ -26,9 +26,9 @@ button::after {
 
 .page-container {
 	width: 100%;
-	max-width: 1440px;
+	max-width: 1180px;
 	margin: 0 auto;
-	padding: 24px 28px 48px;
+	padding: 32px 24px 56px;
 }
 
 .section-title {
@@ -48,7 +48,7 @@ button::after {
 
 .card {
 	background: var(--color-surface);
-	border: 1px solid var(--color-border);
+	border: 1px solid #f0e2d6;
 	border-radius: var(--radius-lg);
 	box-shadow: var(--shadow-card);
 }
@@ -166,6 +166,10 @@ button::after {
 .action-button {
 	background: var(--color-primary);
 	color: #fff;
+}
+
+.action-button:active {
+	background: var(--color-primary-hover);
 }
 
 .secondary-button {

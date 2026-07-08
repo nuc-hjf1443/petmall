@@ -4,11 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.dependencies import get_current_user, get_db, get_optional_current_user
 from models.community import PostFavorite, PostLike
 from models.user import User
-from repository.community_repository import list_enabled_topics
 from schemas.community_schema import CommentCreate, CommentResponse, PostResponse, ReportCreate, TopicResponse
 from services.community_service import (
     add_comment, create_post, create_report, delete_comment, delete_post, follow_user,
-    get_comments, get_post, get_posts, set_interaction,
+    get_comments, get_enabled_topics, get_post, get_posts, set_interaction,
 )
 
 
@@ -19,6 +18,10 @@ router = APIRouter(tags=["community"])
 async def list_posts(
     page: int = 1,
     page_size: int = 20,
+    topic_id: int | None = None,
+    topic_name: str | None = None,
+    topic_scope: str | None = None,
+    sort: str = "latest",
     current_user: User | None = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -27,6 +30,10 @@ async def list_posts(
         max(page, 1),
         min(max(page_size, 1), 100),
         current_user.id if current_user else None,
+        topic_id if topic_id and topic_id > 0 else None,
+        topic_name,
+        topic_scope,
+        sort,
     )
 
 
@@ -34,11 +41,12 @@ async def list_posts(
 async def publish_post(
     content: str | None = Form(default=None),
     topic_ids: str | None = Form(default=None),
+    topic_names: str | None = Form(default=None),
     files: list[UploadFile] = File(default=[]),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await create_post(db, user.id, content, topic_ids, files)
+    return await create_post(db, user.id, content, topic_ids, files, topic_names)
 
 
 @router.get("/posts/{post_id}", response_model=PostResponse)
@@ -104,7 +112,7 @@ async def report(post_id: int, payload: ReportCreate, user: User = Depends(get_c
 
 @router.get("/topics", response_model=list[TopicResponse])
 async def topics(db: AsyncSession = Depends(get_db)):
-    return [TopicResponse.model_validate(topic, from_attributes=True) for topic in await list_enabled_topics(db)]
+    return await get_enabled_topics(db)
 
 
 @router.post("/users/{user_id}/follow")

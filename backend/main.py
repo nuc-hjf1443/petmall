@@ -22,6 +22,7 @@ from routers import (
     payment_router,
     pet_router,
     product_router,
+    support_router,
     upload_router,
     user_router,
     wallet_router,
@@ -54,6 +55,7 @@ app.include_router(user_router.router)
 app.include_router(pet_router.router)
 app.include_router(coin_router.router)
 app.include_router(product_router.router)
+app.include_router(support_router.router)
 app.include_router(upload_router.router)
 app.include_router(cart_router.router)
 app.include_router(order_router.router)

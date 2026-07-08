@@ -1,33 +1,44 @@
-<template>
+﻿<template>
 	<AppShell active="profile">
 		<view class="page-container profile-page">
 			<view class="profile-layout">
-				<view class="profile-card card">
-					<view class="avatar">{{ loggedIn ? '🐾' : '👤' }}</view>
-					<view class="user-info">
-						<text class="nickname">{{ user.nickname || (loggedIn ? '宠爱用户' : '登录后开启专属服务') }}</text>
-						<text class="phone">{{ maskedPhone }}</text>
-					</view>
-					<button v-if="!loggedIn" class="login-button" @click="go('/pages/auth/login')">登录 / 注册</button>
-					<template v-else>
-						<text class="edit" @click="go('/pages/profile/edit')">编辑资料 ></text>
-						<button class="logout-button" @click="logout">退出登录</button>
-					</template>
-					<view class="stats">
-						<view><text>{{ pets.length }}</text><text>我的宠物</text></view>
-						<view><text>{{ coin.balance || 0 }}</text><text>宠物币</text></view>
-						<view><text>0</text><text>我的收藏</text></view>
-					</view>
-					<view class="wallet-summary">
-						<view class="wallet-copy" @click="go('/pages/wallet/index')">
-							<text>账户余额</text>
-							<text>{{ money(wallet.balance) }}</text>
-							<text>冻结 {{ money(wallet.frozen_balance) }}</text>
+				<view class="profile-side">
+					<view class="profile-card card">
+						<view class="avatar">{{ loggedIn ? '🐾' : '👤' }}</view>
+						<view class="user-info">
+							<text class="nickname">{{ user.nickname || (loggedIn ? '宠爱用户' : '登录后开启专属服务') }}</text>
+							<text class="phone">{{ maskedPhone }}</text>
 						</view>
-						<view class="wallet-actions">
-							<button @click="go('/pages/wallet/index')">充值</button>
-							<button @click="go('/pages/wallet/index')">提现</button>
+						<button v-if="!loggedIn" class="login-button" @click="go('/pages/auth/login')">登录 / 注册</button>
+						<template v-else>
+							<text class="edit" @click="go('/pages/profile/edit')">编辑资料 ></text>
+							<button class="logout-button" @click="logout">退出登录</button>
+						</template>
+						<view class="stats">
+							<view @click="go('/pages/pet/index')"><text>{{ pets.length }}</text><text>我的宠物</text></view>
+							<view @click="go('/pages/coin/index')"><text>{{ coin.balance || 0 }}</text><text>宠物币</text></view>
+							<view @click="go('/pages/favorite/index')"><text>{{ favoriteTotal }}</text><text>我的收藏</text></view>
 						</view>
+						<view class="wallet-summary">
+							<view class="wallet-copy" @click="go('/pages/wallet/index')">
+								<text>账户余额</text>
+								<text>{{ money(wallet.balance) }}</text>
+								<text>冻结 {{ money(wallet.frozen_balance) }}</text>
+							</view>
+							<view class="wallet-actions">
+								<button @click="go('/pages/wallet/index')">充值</button>
+								<button @click="go('/pages/wallet/index')">提现</button>
+							</view>
+						</view>
+					</view>
+
+					<view class="support-entry card" @click="openPlatformSupport">
+						<view class="support-icon">CS</view>
+						<view>
+							<text>平台客服</text>
+							<text>联系平台客服并查看历史消息</text>
+						</view>
+						<text class="arrow">›</text>
 					</view>
 				</view>
 
@@ -63,7 +74,7 @@
 
 <script>
 import AppShell from '../../components/AppShell.vue'
-import { authApi, coinApi, petApi, userApi, walletApi } from '../../api'
+import { authApi, coinApi, petApi, productApi, supportApi, userApi, walletApi } from '../../api'
 import { formatMoney } from '../../utils/format'
 
 export default {
@@ -74,6 +85,7 @@ export default {
 			pets: [],
 			coin: {},
 			wallet: {},
+			favoriteTotal: 0,
 			orderActions: [
 				{ icon: '◷', label: '待付款' },
 				{ icon: '▣', label: '待发货' },
@@ -125,6 +137,11 @@ export default {
 			}
 			uni.navigateTo({ url: path })
 		},
+		async openPlatformSupport() {
+			if (!this.loggedIn) return uni.navigateTo({ url: '/pages/auth/login' })
+			const conversation = await supportApi.platform()
+			uni.navigateTo({ url: `/pages/support/platform?id=${conversation.id}` })
+		},
 		logout() {
 			uni.showModal({
 				title: '退出登录',
@@ -138,6 +155,7 @@ export default {
 						this.pets = []
 						this.coin = {}
 						this.wallet = {}
+						this.favoriteTotal = 0
 						uni.showToast({ title: '已退出登录', icon: 'none' })
 						setTimeout(() => uni.reLaunch({ url: '/pages/home/index' }), 300)
 					}
@@ -149,18 +167,20 @@ export default {
 				userApi.me(),
 				petApi.list(),
 				coinApi.account(),
-				walletApi.account()
+				walletApi.account(),
+				productApi.favorites({ page: 1, page_size: 1 })
 			])
 			if (r[0].status === 'fulfilled') this.user = r[0].value || {}
 			if (r[1].status === 'fulfilled') this.pets = r[1].value || []
 			if (r[2].status === 'fulfilled') this.coin = r[2].value || {}
 			if (r[3].status === 'fulfilled') this.wallet = r[3].value || {}
+			if (r[4].status === 'fulfilled') this.favoriteTotal = r[4].value?.total || 0
 		}
 	}
 }
 </script>
 
 <style scoped lang="scss">
-.profile-layout{display:grid;grid-template-columns:330px 1fr;gap:22px;align-items:start}.profile-card{position:sticky;top:90px;padding:28px;text-align:center}.avatar{display:flex;width:88px;height:88px;align-items:center;justify-content:center;margin:0 auto;border:5px solid #fff3e8;border-radius:50%;background:#ffe7cf;font-size:48px}.nickname,.phone{display:block}.nickname{margin-top:14px;font-size:21px;font-weight:800}.phone{margin-top:6px;color:var(--color-text-secondary);font-size:12px}.login-button{height:38px;margin:18px auto 0;padding:0 22px;border-radius:20px;background:var(--color-primary);color:#fff;font-size:13px;line-height:38px}.edit{display:block;margin-top:13px;color:var(--color-primary);font-size:12px}.logout-button{height:34px;margin:14px auto 0;padding:0 22px;border:1px solid var(--color-border);border-radius:17px;background:#fff;color:var(--color-text-secondary);font-size:12px;line-height:34px}.logout-button:active{border-color:var(--color-primary);color:var(--color-primary)}.stats{display:grid;grid-template-columns:repeat(3,1fr);margin-top:24px;padding-top:22px;border-top:1px solid var(--color-border)}.stats view{display:flex;flex-direction:column;gap:5px;color:var(--color-text-secondary);font-size:11px}.stats view text:first-child{color:var(--color-text);font-size:19px;font-weight:800}.stats view+view{border-left:1px solid var(--color-border)}.wallet-summary{margin-top:22px;padding:16px;border:1px solid var(--color-border);border-radius:8px;background:#fffaf6;text-align:left}.wallet-copy{display:flex;flex-direction:column;gap:5px}.wallet-copy text:first-child,.wallet-copy text:last-child{color:var(--color-text-secondary);font-size:11px}.wallet-copy text:nth-child(2){color:var(--color-primary);font-size:25px;font-weight:800}.wallet-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.wallet-actions button{height:34px;border-radius:8px;background:var(--color-primary);color:#fff;font-size:12px;line-height:34px}.wallet-actions button+button{background:#fff;border:1px solid var(--color-primary);color:var(--color-primary)}.profile-content{display:flex;flex-direction:column;gap:18px}.order-card,.menu-card{padding:22px}.card-title{display:flex;align-items:center;justify-content:space-between;font-size:18px;font-weight:800}.more{color:var(--color-text-secondary);font-size:12px;font-weight:400}.order-actions{display:grid;grid-template-columns:repeat(4,1fr);margin-top:25px}.order-actions view{display:flex;flex-direction:column;align-items:center;gap:9px;font-size:12px}.action-icon{font-size:27px;color:var(--color-primary)}.menu-card{display:grid;grid-template-columns:1fr 1fr;gap:4px 28px}.menu-item{display:flex;align-items:center;padding:18px 6px;border-bottom:1px solid #f3ece6;cursor:pointer}.menu-icon{display:flex;width:45px;height:45px;align-items:center;justify-content:center;border-radius:13px;color:var(--color-primary);font-size:17px;font-weight:800}.menu-copy{display:flex;flex:1;min-width:0;flex-direction:column;margin-left:13px}.menu-title{font-size:15px;font-weight:700}.menu-desc{overflow:hidden;margin-top:5px;color:var(--color-text-secondary);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.arrow{color:#aaa;font-size:22px}
-@media(max-width:900px){.profile-layout{display:block}.profile-card{position:static;padding:20px}.avatar{width:68px;height:68px;font-size:38px}.nickname{font-size:18px}.stats{margin-top:18px;padding-top:17px}.profile-content{margin-top:12px;gap:12px}.order-card,.menu-card{padding:16px}.menu-card{display:block}.menu-item{padding:14px 2px}.menu-icon{width:40px;height:40px}.menu-title{font-size:14px}.menu-desc{font-size:10px}}
+.profile-layout{display:grid;grid-template-columns:330px 1fr;gap:22px;align-items:start}.profile-side{position:sticky;top:90px;display:flex;flex-direction:column;gap:14px}.profile-card{padding:28px;text-align:center}.avatar{display:flex;width:88px;height:88px;align-items:center;justify-content:center;margin:0 auto;border:5px solid #fff3e8;border-radius:50%;background:#ffe7cf;font-size:48px}.nickname,.phone{display:block}.nickname{margin-top:14px;font-size:21px;font-weight:800}.phone{margin-top:6px;color:var(--color-text-secondary);font-size:12px}.login-button{height:38px;margin:18px auto 0;padding:0 22px;border-radius:20px;background:var(--color-primary);color:#fff;font-size:13px;line-height:38px}.edit{display:block;margin-top:13px;color:var(--color-primary);font-size:12px}.logout-button{height:34px;margin:14px auto 0;padding:0 22px;border:1px solid var(--color-border);border-radius:17px;background:#fff;color:var(--color-text-secondary);font-size:12px;line-height:34px}.logout-button:active{border-color:var(--color-primary);color:var(--color-primary)}.stats{display:grid;grid-template-columns:repeat(3,1fr);margin-top:24px;padding-top:22px;border-top:1px solid var(--color-border)}.stats view{display:flex;flex-direction:column;gap:5px;color:var(--color-text-secondary);font-size:11px;cursor:pointer}.stats view:active text{color:var(--color-primary)}.stats view text:first-child{color:var(--color-text);font-size:19px;font-weight:800}.stats view+view{border-left:1px solid var(--color-border)}.wallet-summary{margin-top:22px;padding:16px;border:1px solid var(--color-border);border-radius:8px;background:#fffaf6;text-align:left}.wallet-copy{display:flex;flex-direction:column;gap:5px}.wallet-copy text:first-child,.wallet-copy text:last-child{color:var(--color-text-secondary);font-size:11px}.wallet-copy text:nth-child(2){color:var(--color-primary);font-size:25px;font-weight:800}.wallet-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.wallet-actions button{height:34px;border-radius:8px;background:var(--color-primary);color:#fff;font-size:12px;line-height:34px}.wallet-actions button+button{background:#fff;border:1px solid var(--color-primary);color:var(--color-primary)}.support-entry{display:grid;grid-template-columns:45px 1fr auto;align-items:center;gap:13px;padding:16px 18px;cursor:pointer}.support-icon{display:flex;width:45px;height:45px;align-items:center;justify-content:center;border-radius:13px;background:#eef6ff;color:var(--color-primary);font-size:15px;font-weight:900}.support-entry view:nth-child(2){display:flex;min-width:0;flex-direction:column;gap:5px}.support-entry view:nth-child(2) text:first-child{font-size:15px;font-weight:800}.support-entry view:nth-child(2) text:last-child{overflow:hidden;color:var(--color-text-secondary);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.support-entry:active{border-color:var(--color-primary);background:#fffaf6}.profile-content{display:flex;flex-direction:column;gap:18px}.order-card,.menu-card{padding:22px}.card-title{display:flex;align-items:center;justify-content:space-between;font-size:18px;font-weight:800}.more{color:var(--color-text-secondary);font-size:12px;font-weight:400}.order-actions{display:grid;grid-template-columns:repeat(4,1fr);margin-top:25px}.order-actions view{display:flex;flex-direction:column;align-items:center;gap:9px;font-size:12px}.action-icon{font-size:27px;color:var(--color-primary)}.menu-card{display:grid;grid-template-columns:1fr 1fr;gap:4px 28px}.menu-item{display:flex;align-items:center;padding:18px 6px;border-bottom:1px solid #f3ece6;cursor:pointer}.menu-icon{display:flex;width:45px;height:45px;align-items:center;justify-content:center;border-radius:13px;color:var(--color-primary);font-size:17px;font-weight:800}.menu-copy{display:flex;flex:1;min-width:0;flex-direction:column;margin-left:13px}.menu-title{font-size:15px;font-weight:700}.menu-desc{overflow:hidden;margin-top:5px;color:var(--color-text-secondary);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.arrow{color:#aaa;font-size:22px}
+@media(max-width:900px){.profile-layout{display:block}.profile-side{position:static}.profile-card{padding:20px}.avatar{width:68px;height:68px;font-size:38px}.nickname{font-size:18px}.stats{margin-top:18px;padding-top:17px}.support-entry{margin-top:12px}.profile-content{margin-top:12px;gap:12px}.order-card,.menu-card{padding:16px}.menu-card{display:block}.menu-item{padding:14px 2px}.menu-icon{width:40px;height:40px}.menu-title{font-size:14px}.menu-desc{font-size:10px}}
 </style>

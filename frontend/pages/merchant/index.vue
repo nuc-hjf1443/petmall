@@ -87,8 +87,6 @@
 							<text class="topbar-subtitle">管理店铺资料、商品和订单履约</text>
 						</view>
 						<view class="topbar-actions">
-							<view class="topbar-pill">客服消息</view>
-							<view class="topbar-pill">审核中心</view>
 							<view class="avatar">{{ avatarText }}</view>
 						</view>
 					</view>
@@ -241,6 +239,58 @@
 							</view>
 						</view>
 					</view>
+
+					<view v-if="activeTab === 'audit'" class="console-content">
+						<view class="card panel">
+							<view class="section-head">
+								<view>
+									<text class="section-title">审核中心</text>
+									<text class="section-subtitle">查看商品提交审核、审核中和驳回原因。</text>
+								</view>
+							</view>
+							<view v-if="!auditProducts.length" class="empty-inline">暂无需要关注的审核事项</view>
+							<view v-else class="data-list">
+								<view v-for="item in auditProducts" :key="item.id" class="data-row">
+									<view class="data-main">
+										<text class="data-title">{{ item.title }}</text>
+										<text class="data-meta">{{ productStatusText(item.status) }} · {{ item.audit_reason || auditHint(item.status) }}</text>
+									</view>
+									<text class="status-chip">{{ productStatusText(item.status) }}</text>
+									<button v-if="['draft','rejected','off_shelf'].includes(item.status)" class="action-button" @click="submit(item.id)">提交审核</button>
+									<button class="secondary-button" @click="editProduct(item.id)">编辑</button>
+								</view>
+							</view>
+						</view>
+					</view>
+
+					<view v-if="activeTab === 'support'" class="console-content">
+						<view class="card panel">
+							<view class="section-head">
+								<view>
+									<text class="section-title">客服消息</text>
+									<text class="section-subtitle">处理用户咨询，必要时可移交平台客服。</text>
+								</view>
+								<button class="secondary-button compact" @click="loadSupport">刷新</button>
+							</view>
+							<view class="tabs">
+								<view class="tab" :class="{ active: supportFilter === 'pending' }" @click="setSupportFilter('pending')">未处理</view>
+								<view class="tab" :class="{ active: supportFilter === 'resolved' }" @click="setSupportFilter('resolved')">已处理</view>
+							</view>
+							<view v-if="!supportConversations.length" class="empty-inline">暂无客服会话</view>
+							<view v-else class="data-list">
+								<view v-for="item in supportConversations" :key="item.id" class="data-row">
+									<view class="data-main">
+										<text class="data-title">{{ item.merchant_name || '商家客服' }} #{{ item.id }}</text>
+										<text class="data-meta">{{ item.messages?.slice(-1)[0]?.content || '暂无消息' }}</text>
+									</view>
+									<text class="status-chip">{{ item.status === 'resolved' ? '已处理' : '未处理' }}</text>
+									<button class="secondary-button" @click="openSupport(item, 'merchant')">打开</button>
+									<button class="secondary-button" @click="setSupportStatus(item, item.status === 'resolved' ? 'pending' : 'resolved')">{{ item.status === 'resolved' ? '标记未处理' : '标记已处理' }}</button>
+									<button v-if="!item.assigned_to_platform" class="danger-button" @click="transferSupport(item)">移交平台</button>
+								</view>
+							</view>
+						</view>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -249,7 +299,7 @@
 
 <script>
 import AppShell from '../../components/AppShell.vue'
-import { merchantApi } from '../../api'
+import { merchantApi, supportApi } from '../../api'
 
 export default {
 	components: { AppShell },
@@ -258,11 +308,13 @@ export default {
 			merchant: null,
 			dashboard: null,
 			products: [],
+			supportConversations: [],
 			loading: true,
 			saving: false,
 			activeTab: 'home',
 			productFilter: 'all',
 			orderFilter: 'all',
+			supportFilter: 'pending',
 			form: {
 				shop_name: '',
 				contact_name: '',
@@ -284,7 +336,9 @@ export default {
 			menuItems: [
 				{ key: 'home', label: '首页', icon: '⌂' },
 				{ key: 'products', label: '商品管理', icon: '□' },
-				{ key: 'orders', label: '订单管理', icon: '◎' }
+				{ key: 'orders', label: '订单管理', icon: '◎' },
+				{ key: 'audit', label: '审核中心', icon: '✓' },
+				{ key: 'support', label: '客服消息', icon: 'S' }
 			],
 			productFilters: [
 				{ key: 'all', label: '全部' },
@@ -355,6 +409,9 @@ export default {
 			if (this.productFilter === 'all') return this.products
 			return this.products.filter(item => item.status === this.productFilter)
 		},
+		auditProducts() {
+			return this.products.filter(item => ['draft', 'pending', 'rejected', 'off_shelf'].includes(item.status))
+		},
 		todayStats() {
 			return [
 				{ label: '支付金额', value: '¥ 0.00', desc: '今日实收' },
@@ -380,6 +437,7 @@ export default {
 			this.loading = true
 			this.dashboard = null
 			this.products = []
+			this.supportConversations = []
 			try {
 				this.merchant = await merchantApi.me()
 				this.syncForm()
@@ -390,12 +448,35 @@ export default {
 			if (this.merchant?.status === 'approved') {
 				const result = await Promise.allSettled([
 					merchantApi.dashboard(),
-					merchantApi.products()
+					merchantApi.products(),
+					supportApi.merchantList({ status: this.supportFilter, page: 1, page_size: 100 })
 				])
 				if (result[0].status === 'fulfilled') this.dashboard = result[0].value
 				if (result[1].status === 'fulfilled') this.products = result[1].value || []
+				if (result[2].status === 'fulfilled') this.supportConversations = result[2].value?.items || []
 			}
 			this.loading = false
+		},
+		async loadSupport() {
+			const result = await supportApi.merchantList({ status: this.supportFilter, page: 1, page_size: 100 })
+			this.supportConversations = result.items || []
+		},
+		async setSupportFilter(status) {
+			this.supportFilter = status
+			await this.loadSupport()
+		},
+		openSupport(item, role) {
+			uni.navigateTo({ url: `/pages/support/merchant?id=${item.id}&role=${role}` })
+		},
+		async setSupportStatus(item, status) {
+			await supportApi.merchantStatus(item.id, status)
+			uni.showToast({ title: status === 'resolved' ? '已标记处理' : '已标记未处理' })
+			this.loadSupport()
+		},
+		async transferSupport(item) {
+			await supportApi.merchantTransfer(item.id)
+			uni.showToast({ title: '已移交平台客服' })
+			this.loadSupport()
 		},
 		syncForm() {
 			Object.keys(this.form).forEach(key => {
@@ -437,6 +518,15 @@ export default {
 				rejected: '已拒绝'
 			}
 			return map[status] || status || '未知'
+		},
+		auditHint(status) {
+			const map = {
+				draft: '草稿商品尚未提交平台审核',
+				pending: '平台正在审核，请等待结果',
+				off_shelf: '商品当前已下架，可修改后重新提交',
+				rejected: '请根据审核备注修改后重新提交'
+			}
+			return map[status] || '暂无备注'
 		},
 		newProduct() {
 			uni.navigateTo({ url: '/pages/merchant/product-edit' })
