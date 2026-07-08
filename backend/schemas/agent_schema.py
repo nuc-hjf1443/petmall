@@ -48,6 +48,25 @@ class AgentSessionResponse(BaseModel):
     updated_at: datetime
 
 
+class AgentSessionListItem(BaseModel):
+    id: int
+    agent_type: str
+    title: str | None = None
+    pet_id: int | None = None
+    latest_message_content: str | None = None
+    latest_message_at: datetime | None = None
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentSessionListResponse(BaseModel):
+    items: list[AgentSessionListItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class QaAnswerResponse(BaseModel):
     session_id: int
     user_message: AgentMessageResponse
@@ -60,6 +79,10 @@ class GuideRecommendationResponse(BaseModel):
     rank: int
     reason: str
     caution: str | None = None
+    source: str | None = None
+    source_detail: str | None = None
+    score: float | None = None
+    matched_pet_fields: list[str] = Field(default_factory=list)
     product: dict[str, Any]
 
 

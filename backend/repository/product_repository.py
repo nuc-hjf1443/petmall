@@ -265,7 +265,12 @@ async def search_sale_products(
         pattern = f"%{query.strip()}%"
         filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
     if pet_type:
-        filters.append(Product.applicable_pet_type == pet_type.strip())
+        filters.append(
+            or_(
+                Product.applicable_pet_type == pet_type.strip(),
+                Product.applicable_pet_type.is_(None),
+            )
+        )
     result = await db.execute(
         select(Product)
         .join(ProductCategory, ProductCategory.id == Product.category_id)

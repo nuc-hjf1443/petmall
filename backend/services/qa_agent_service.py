@@ -1,6 +1,6 @@
 import json
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -74,6 +74,65 @@ async def get_user_session(
     if session is None:
         raise not_found("Agent session not found")
     return session
+
+
+async def list_user_sessions(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    agent_type: str | None,
+    page: int,
+    page_size: int,
+) -> dict:
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 50)
+    filters = [AgentSession.user_id == user_id]
+    if agent_type is not None:
+        filters.append(AgentSession.agent_type == agent_type)
+
+    total = int((await db.scalar(select(func.count(AgentSession.id)).where(*filters))) or 0)
+    latest_message = (
+        select(
+            AgentMessage.session_id,
+            func.max(AgentMessage.created_at).label("latest_message_at"),
+        )
+        .group_by(AgentMessage.session_id)
+        .subquery()
+    )
+    result = await db.execute(
+        select(AgentSession)
+        .outerjoin(latest_message, latest_message.c.session_id == AgentSession.id)
+        .options(selectinload(AgentSession.messages))
+        .where(*filters)
+        .order_by(func.coalesce(latest_message.c.latest_message_at, AgentSession.updated_at).desc(), AgentSession.id.desc())
+        .offset((safe_page - 1) * safe_page_size)
+        .limit(safe_page_size)
+    )
+    sessions = list(result.scalars().unique().all())
+    items = []
+    for session in sessions:
+        messages = sorted(session.messages, key=lambda item: item.id)
+        latest_message = messages[-1] if messages else None
+        items.append(
+            {
+                "id": session.id,
+                "agent_type": session.agent_type,
+                "title": session.title,
+                "pet_id": session.pet_id,
+                "latest_message_content": latest_message.content if latest_message else None,
+                "latest_message_at": latest_message.created_at if latest_message else None,
+                "message_count": len(messages),
+                "created_at": session.created_at,
+                "updated_at": session.updated_at,
+            }
+        )
+
+    return {
+        "items": items,
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_page_size,
+    }
 
 
 def assess_risk(content: str) -> str:
