@@ -200,7 +200,7 @@ def write_docs(products: list[dict]) -> None:
         "如需指定测试商家 ID：",
         "",
         "```bash",
-        "python backend/scripts/seed_products_from_categories.py --merchant-id 3001",
+        "python backend/scripts/seed_products_from_categories.py --merchant-id 3",
         "```",
         "",
         "## 数据调整建议",

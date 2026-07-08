@@ -3,9 +3,10 @@ import pytest
 
 from core.auth import hash_password
 from core.errors import AppException
+from settings.config import get_settings
 from main import app
 from models.order import Order, OrderItem
-from models.product import Product, ProductCategory, ProductSku, ProductStatus
+from models.product import Product, ProductCategory, ProductImage, ProductSku, ProductStatus
 from models.user import User
 from schemas.product_schema import (
     ProductCreate,
@@ -491,6 +492,166 @@ async def test_merchant_product_inventory_images_and_audit(test_context):
         off_shelf = await get_product_audit_detail(session, product_id)
         assert off_shelf["status"] == ProductStatus.OFF_SHELF.value
         assert off_shelf["audit_reason"] == "Compliance review"
+
+
+async def test_off_shelf_product_image_update_deletes_unreferenced_generated_file(test_context, tmp_path):
+    settings = get_settings()
+    original_generated_asset_dir = settings.generated_asset_dir
+    settings.generated_asset_dir = str(tmp_path)
+    try:
+        old_url = "/generated/uploads/product/2001/old.jpg"
+        new_url = "/generated/uploads/product/2001/new.jpg"
+        old_path = tmp_path / "public" / "uploads" / "product" / "2001" / "old.jpg"
+        new_path = tmp_path / "public" / "uploads" / "product" / "2001" / "new.jpg"
+        old_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.write_bytes(b"old")
+        new_path.write_bytes(b"new")
+
+        async with test_context["session_factory"]() as session:
+            category = ProductCategory(name="Image Health", sort_order=1)
+            session.add(category)
+            await session.commit()
+            await session.refresh(category)
+
+            created = await create_merchant_product(
+                session,
+                2001,
+                ProductCreate(
+                    category_id=category.id,
+                    title="Image Product",
+                    skus=[
+                        ProductSkuUpsert(
+                            sku_code="IMG-OLD",
+                            name="Default",
+                            specs={},
+                            price=1200,
+                            stock=5,
+                        ),
+                    ],
+                    images=[ProductImageInput(image_url=old_url, is_primary=True)],
+                ),
+            )
+            product = await session.get(Product, created.id)
+            product.status = ProductStatus.OFF_SHELF.value
+            await session.commit()
+
+            updated = await update_merchant_product(
+                session,
+                2001,
+                created.id,
+                ProductUpdate(images=[ProductImageInput(image_url=new_url, is_primary=True)]),
+            )
+            assert updated.cover_image == new_url
+            assert [image.image_url for image in updated.images] == [new_url]
+            assert not old_path.exists()
+            assert new_path.exists()
+    finally:
+        settings.generated_asset_dir = original_generated_asset_dir
+
+
+async def test_product_image_update_keeps_generated_file_when_still_referenced(test_context, tmp_path):
+    settings = get_settings()
+    original_generated_asset_dir = settings.generated_asset_dir
+    settings.generated_asset_dir = str(tmp_path)
+    try:
+        shared_url = "/generated/uploads/product/2001/shared.jpg"
+        new_url = "/generated/uploads/product/2001/replacement.jpg"
+        shared_path = tmp_path / "public" / "uploads" / "product" / "2001" / "shared.jpg"
+        new_path = tmp_path / "public" / "uploads" / "product" / "2001" / "replacement.jpg"
+        shared_path.parent.mkdir(parents=True, exist_ok=True)
+        shared_path.write_bytes(b"shared")
+        new_path.write_bytes(b"new")
+
+        async with test_context["session_factory"]() as session:
+            category = ProductCategory(name="Shared Image Health", sort_order=1)
+            session.add(category)
+            await session.flush()
+            product_a = Product(
+                merchant_id=2001,
+                category_id=category.id,
+                title="Shared A",
+                cover_image=shared_url,
+                price=1200,
+                stock=5,
+                status=ProductStatus.OFF_SHELF.value,
+            )
+            product_b = Product(
+                merchant_id=2001,
+                category_id=category.id,
+                title="Shared B",
+                cover_image=shared_url,
+                price=1300,
+                stock=5,
+                status=ProductStatus.DRAFT.value,
+            )
+            session.add_all([product_a, product_b])
+            await session.flush()
+            session.add_all(
+                [
+                    ProductSku(product_id=product_a.id, sku_code="SHARED-A", name="A", specs={}, price=1200, stock=5),
+                    ProductSku(product_id=product_b.id, sku_code="SHARED-B", name="B", specs={}, price=1300, stock=5),
+                    ProductImage(product_id=product_a.id, image_url=shared_url, sort_order=0, is_primary=True),
+                    ProductImage(product_id=product_b.id, image_url=shared_url, sort_order=0, is_primary=True),
+                ]
+            )
+            await session.commit()
+
+            updated = await update_merchant_product(
+                session,
+                2001,
+                product_a.id,
+                ProductUpdate(images=[ProductImageInput(image_url=new_url, is_primary=True)]),
+            )
+            assert updated.cover_image == new_url
+            assert shared_path.exists()
+    finally:
+        settings.generated_asset_dir = original_generated_asset_dir
+
+
+async def test_on_sale_product_image_update_is_rejected(test_context):
+    async with test_context["session_factory"]() as session:
+        category = ProductCategory(name="On Sale Image", sort_order=1)
+        session.add(category)
+        await session.flush()
+        product = Product(
+            merchant_id=2001,
+            category_id=category.id,
+            title="On Sale Product",
+            cover_image="/generated/uploads/product/2001/old.jpg",
+            price=1200,
+            stock=5,
+            status=ProductStatus.ON_SALE.value,
+        )
+        session.add(product)
+        await session.flush()
+        session.add_all(
+            [
+                ProductSku(product_id=product.id, sku_code="ONSALE-IMG", name="Default", specs={}, price=1200, stock=5),
+                ProductImage(
+                    product_id=product.id,
+                    image_url="/generated/uploads/product/2001/old.jpg",
+                    sort_order=0,
+                    is_primary=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        with pytest.raises(AppException) as denied:
+            await update_merchant_product(
+                session,
+                2001,
+                product.id,
+                ProductUpdate(
+                    images=[
+                        ProductImageInput(
+                            image_url="/generated/uploads/product/2001/new.jpg",
+                            is_primary=True,
+                        )
+                    ]
+                ),
+            )
+        assert denied.value.status_code == 400
 
 
 async def test_review_verifier_duplicate_and_summary(test_context, strong_password):

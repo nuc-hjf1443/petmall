@@ -149,9 +149,9 @@
 				</view>
 			</view>
 
-			<view v-if="!id" class="form-section card">
+			<view class="form-section card">
 				<view class="section-heading">
-					<view class="section-index">3</view>
+					<view class="section-index">{{ id ? 2 : 3 }}</view>
 					<view>
 						<text class="section-name">商品图片</text>
 						<text class="section-description">选择本地图片上传，保存后作为商城展示主图</text>
@@ -278,10 +278,46 @@ export default {
 		productApi.categories()
 			.then(categories => {
 				this.categories = categories || []
+				if (this.id) this.loadProduct()
 			})
 			.catch(() => {})
 	},
 	methods: {
+		async loadProduct() {
+			try {
+				const response = await merchantApi.product(this.id)
+				const product = response.product || response
+				this.form.title = product.title || ''
+				this.form.description = product.description || ''
+				this.form.brand = product.brand || ''
+				this.form.applicable_pet_type = product.applicable_pet_type || ''
+				this.categoryId = product.category_id || null
+				this.applyCategoryPath(product.category_id)
+				this.syncChoiceOptions()
+				const primary = (product.images || []).find(item => item.is_primary)
+				const first = (product.images || [])[0]
+				this.imageUrl = product.cover_image || (primary && primary.image_url) || (first && first.image_url) || ''
+				this.imagePreviewError = false
+			} catch (error) {
+				uni.showToast({ title: '商品信息加载失败', icon: 'none' })
+			}
+		},
+		applyCategoryPath(categoryId) {
+			const third = this.categories.find(item => item.id === categoryId)
+			if (!third) return
+			this.categoryId = third.id
+			this.secondCategoryId = third.parent_id || null
+			const second = this.categories.find(item => item.id === this.secondCategoryId)
+			this.firstCategoryId = second ? second.parent_id : null
+		},
+		syncChoiceOptions() {
+			this.selectedPetTypeOption = this.petTypeOptions.includes(this.form.applicable_pet_type)
+				? this.form.applicable_pet_type
+				: (this.form.applicable_pet_type ? '其他' : '')
+			this.selectedBrandOption = this.brandOptions.includes(this.form.brand)
+				? this.form.brand
+				: (this.form.brand ? '其他' : '')
+		},
 		closeCategoryDropdowns() {
 			this.categoryOpen = { first: false, second: false, third: false }
 		},
@@ -367,7 +403,11 @@ export default {
 					applicable_pet_type: this.form.applicable_pet_type || null
 				}
 				if (this.id) {
-					await merchantApi.updateProduct(this.id, payloadForm)
+					const updatePayload = { ...payloadForm }
+					if (this.imageUrl) {
+						updatePayload.images = [{ image_url: this.imageUrl, is_primary: true, sort_order: 0 }]
+					}
+					await merchantApi.updateProduct(this.id, updatePayload)
 				} else {
 					await merchantApi.createProduct({
 						...payloadForm,

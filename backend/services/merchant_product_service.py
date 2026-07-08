@@ -6,6 +6,7 @@ from schemas.product_schema import ProductCreate, ProductUpdate
 from services.merchant_service import get_my_merchant
 from services.product_service import (
     create_merchant_product,
+    get_product_for_merchant,
     get_products_for_merchant,
     set_merchant_product_sale_status,
     submit_product_for_audit,
@@ -45,6 +46,12 @@ async def list_merchant_products(db: AsyncSession, user_id: int) -> list:
         }
         for product in products
     ]
+
+
+async def get_merchant_product(db: AsyncSession, user_id: int, product_id: int) -> dict:
+    merchant = await get_active_merchant_for_user(db, user_id)
+    product = await get_product_for_merchant(db, merchant.id, product_id)
+    return product.model_dump()
 
 
 async def create_product_for_merchant(

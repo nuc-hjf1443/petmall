@@ -25,6 +25,7 @@ from services.merchant_service import (
 )
 from services.merchant_product_service import (
     create_product_for_merchant,
+    get_merchant_product,
     list_merchant_products,
     set_merchant_product_discount,
     set_merchant_product_off_sale,
@@ -99,6 +100,15 @@ async def merchant_products(
     db: AsyncSession = Depends(get_db),
 ) -> list:
     return await list_merchant_products(db, current_user.id)
+
+
+@router.get("/merchants/me/products/{product_id}", response_model=MerchantProductResponse)
+async def get_merchant_product_api(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return {"product": await get_merchant_product(db, current_user.id, product_id)}
 
 
 @router.post("/merchants/me/products", response_model=MerchantProductResponse)
