@@ -1,7 +1,7 @@
 """add support conversations and favorites
 
-Revision ID: 0011_support_favorites_follow
-Revises: 0010_product_brand
+Revision ID: 0012_support_favorites_follow
+Revises: 0011_guide_recommendation_metadata
 Create Date: 2026-07-08
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0011_support_favorites_follow"
-down_revision: str | None = "0010_product_brand"
+revision: str = "0012_support_favorites_follow"
+down_revision: str | None = "0011_guide_recommendation_metadata"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
