@@ -91,8 +91,17 @@ class GuideRecommendationResponse(BaseModel):
     product: dict[str, Any]
 
 
+class GuideQuestionResponse(BaseModel):
+    key: str
+    question: str
+    options: list[dict[str, str]] = Field(default_factory=list)
+
+
 class GuideAnswerResponse(BaseModel):
     session_id: int
     user_message: AgentMessageResponse
     assistant_message: AgentMessageResponse
     recommendations: list[GuideRecommendationResponse]
+    guide_state: dict[str, Any] | None = None
+    next_questions: list[GuideQuestionResponse] = Field(default_factory=list)
+    requires_user_confirmation: bool = False

@@ -153,7 +153,14 @@ async def send_guide_agent_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GuideAnswerResponse:
-    user_message, assistant_message, recommendations = await send_guide_message(
+    (
+        user_message,
+        assistant_message,
+        recommendations,
+        guide_state,
+        next_questions,
+        requires_user_confirmation,
+    ) = await send_guide_message(
         db,
         current_user,
         session_id,
@@ -165,6 +172,9 @@ async def send_guide_agent_message(
         user_message=user_message,
         assistant_message=assistant_message,
         recommendations=recommendations,
+        guide_state=guide_state,
+        next_questions=next_questions,
+        requires_user_confirmation=requires_user_confirmation,
     )
 
 

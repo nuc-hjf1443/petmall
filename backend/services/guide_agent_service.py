@@ -15,6 +15,7 @@ from models.user import User
 from schemas.agent_schema import GuideSessionCreate
 from services.product_service import get_product_for_agent, search_products_for_agent
 from services.profile_document_service import get_pet_detail_summary
+from services.pet_service import list_pets
 
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,22 @@ CAT_QUERY_KEYWORDS = (
 
 DOG_PRODUCT_SEARCH_TERMS = ("\u72d7\u7cae", "\u72ac\u7cae", "\u4f4e\u654f", "\u72d7", "\u72ac")
 CAT_PRODUCT_SEARCH_TERMS = ("\u732b\u7cae", "\u732b\u7802", "\u4f4e\u654f", "\u732b", "\u5e7c\u732b")
+PRODUCT_INTENT_TERMS = (
+    "\u51bb\u5e72",
+    "\u96f6\u98df",
+    "\u4e3b\u7cae",
+    "\u72d7\u7cae",
+    "\u732b\u7cae",
+    "\u73a9\u5177",
+    "\u6d17\u62a4",
+    "\u6d74\u9732",
+    "\u7259\u5237",
+    "\u7259\u818f",
+    "\u732b\u7802",
+    "\u7275\u5f15",
+    "\u8425\u517b",
+)
+GUIDE_STATE_VERSION = 1
 
 
 async def create_guide_session(
@@ -125,6 +142,136 @@ def assess_guide_risk(content: str) -> str:
     return "normal"
 
 
+def _empty_guide_state() -> dict[str, Any]:
+    return {
+        "version": GUIDE_STATE_VERSION,
+        "stage": "collecting",
+        "slots": {},
+        "missing_slots": [],
+        "history_summary": "",
+    }
+
+
+def _load_guide_state(session: AgentSession) -> dict[str, Any]:
+    if not session.context_summary:
+        return _empty_guide_state()
+    try:
+        parsed = json.loads(session.context_summary)
+    except json.JSONDecodeError:
+        state = _empty_guide_state()
+        state["history_summary"] = session.context_summary
+        return state
+    if not isinstance(parsed, dict):
+        return _empty_guide_state()
+    state = _empty_guide_state()
+    state.update(parsed)
+    if not isinstance(state.get("slots"), dict):
+        state["slots"] = {}
+    if not isinstance(state.get("missing_slots"), list):
+        state["missing_slots"] = []
+    return state
+
+
+def _save_guide_state(session: AgentSession, guide_state: dict[str, Any]) -> None:
+    state = _empty_guide_state()
+    state.update(guide_state or {})
+    state["version"] = GUIDE_STATE_VERSION
+    session.context_summary = json.dumps(state, ensure_ascii=False)
+
+
+def _guide_slots(guide_state: dict[str, Any]) -> dict[str, Any]:
+    slots = guide_state.get("slots")
+    if not isinstance(slots, dict):
+        slots = {}
+        guide_state["slots"] = slots
+    return slots
+
+
+def _extract_budget(content: str) -> int | None:
+    match = re.search(r"(\d{2,6})\s*(?:\u5143|\u5757|rmb|RMB)?", content or "")
+    if match:
+        return int(match.group(1))
+    chinese_budget_map = {
+        "\u4e00\u767e": 100,
+        "\u4e24\u767e": 200,
+        "\u4e8c\u767e": 200,
+        "\u4e09\u767e": 300,
+        "\u4e94\u767e": 500,
+    }
+    for keyword, value in chinese_budget_map.items():
+        if keyword in content:
+            return value
+    return None
+
+
+def _extract_category(content: str) -> str | None:
+    category_keywords = {
+        "freeze_dried": ("\u51bb\u5e72",),
+        "snack": ("\u96f6\u98df", "\u7f50\u5934", "\u5999\u9c9c\u5305"),
+        "food": ("\u4e3b\u7cae", "\u72d7\u7cae", "\u732b\u7cae", "food"),
+        "toy": ("\u73a9\u5177", "\u7403", "\u8010\u54ac", "toy"),
+        "bath": ("\u6d17\u62a4", "\u6d74\u9732", "\u6d17\u6fa1"),
+        "litter": ("\u732b\u7802",),
+        "leash": ("\u7275\u5f15", "\u9879\u5708"),
+    }
+    lowered = (content or "").lower()
+    for category, keywords in category_keywords.items():
+        if any(keyword.lower() in lowered for keyword in keywords):
+            return category
+    return None
+
+
+def _extract_preferences(content: str) -> list[str]:
+    preference_keywords = (
+        "\u4f4e\u654f",
+        "\u65e0\u8c37",
+        "\u9ad8\u86cb\u767d",
+        "\u8010\u54ac",
+        "\u53bb\u6cea\u75d5",
+        "\u4fbf\u643a",
+        "\u9e21\u8089",
+        "\u725b\u8089",
+        "\u9c7c",
+        "sensitive",
+        "allergy",
+    )
+    lowered = (content or "").lower()
+    return [keyword for keyword in preference_keywords if keyword.lower() in lowered][:5]
+
+
+def _merge_guide_state_from_content(guide_state: dict[str, Any], content: str) -> None:
+    slots = _guide_slots(guide_state)
+    if pet_type := infer_pet_type_from_guide_query(content):
+        slots["pet_type"] = pet_type
+    if budget := _extract_budget(content):
+        slots["budget"] = budget
+    if category := _extract_category(content):
+        slots["category"] = category
+    preferences = _extract_preferences(content)
+    if preferences:
+        existing = [str(item) for item in slots.get("preferences") or [] if str(item).strip()]
+        for preference in preferences:
+            if preference not in existing:
+                existing.append(preference)
+        slots["preferences"] = existing
+
+
+def _missing_guide_slots(guide_state: dict[str, Any]) -> list[str]:
+    slots = _guide_slots(guide_state)
+    missing: list[str] = []
+    if not slots.get("pet_id") and not slots.get("pet_type"):
+        missing.append("pet")
+    if not slots.get("category"):
+        missing.append("category")
+    if (
+        not slots.get("budget")
+        and not slots.get("preferences")
+        and not (slots.get("category") and (slots.get("pet_id") or slots.get("pet_type")))
+    ):
+        missing.append("budget_or_preference")
+    return missing
+
+
 def infer_pet_type_from_guide_query(content: str) -> str | None:
     text = (content or "").lower()
     dog_score = sum(1 for keyword in DOG_QUERY_KEYWORDS if keyword.lower() in text)
@@ -157,6 +304,9 @@ def _guide_product_search_queries(query: str, pet_type: str | None) -> list[str]
         queries.append(query.strip())
     keywords = DOG_PRODUCT_SEARCH_TERMS if pet_type == "dog" else CAT_PRODUCT_SEARCH_TERMS if pet_type == "cat" else ()
     text = query.lower()
+    for keyword in PRODUCT_INTENT_TERMS:
+        if keyword.lower() in text and keyword not in queries:
+            queries.append(keyword)
     for keyword in keywords:
         if keyword.lower() in text and keyword not in queries:
             queries.append(keyword)
@@ -212,18 +362,22 @@ def _safe_int(value: Any) -> int | None:
         return None
 
 
-async def _build_guide_history_context(session: AgentSession) -> tuple[str, list[dict[str, str]]]:
+async def _build_guide_history_context(
+    session: AgentSession,
+    guide_state: dict[str, Any],
+) -> tuple[str, list[dict[str, str]]]:
     messages = sorted(session.messages, key=lambda item: item.id)
     old_messages = messages[:-GUIDE_RECENT_HISTORY_LIMIT]
     recent_messages = messages[-GUIDE_RECENT_HISTORY_LIMIT:]
     recent_history = _messages_to_history(recent_messages)
+    existing_summary = str(guide_state.get("history_summary") or "")
     if not old_messages:
-        return session.context_summary or "", recent_history
+        return existing_summary, recent_history
 
     old_history = _messages_to_history(old_messages)
     try:
         summary = await summarize_guide_history(
-            existing_summary=session.context_summary,
+            existing_summary=existing_summary,
             history=old_history,
             max_chars=GUIDE_HISTORY_SUMMARY_MAX_CHARS,
         )
@@ -239,11 +393,11 @@ async def _build_guide_history_context(session: AgentSession) -> tuple[str, list
             },
         )
         summary = build_rule_based_guide_history_summary(
-            session.context_summary,
+            existing_summary,
             old_history,
             max_chars=GUIDE_HISTORY_SUMMARY_MAX_CHARS,
         )
-    session.context_summary = summary
+    guide_state["history_summary"] = summary
     return summary, recent_history
 
 
@@ -255,7 +409,6 @@ async def _search_product_candidates(
     *,
     session_id: int,
     user_id: int,
-    allow_empty_query_fallback: bool = True,
 ) -> list[dict[str, Any]]:
     for search_query in _guide_product_search_queries(query, pet_type):
         try:
@@ -277,25 +430,7 @@ async def _search_product_candidates(
         products = _filter_products_by_pet_type(products, pet_type)
         if products:
             return products
-    if not allow_empty_query_fallback:
-        return []
-    try:
-        products = await search_products_for_agent(db, "", pet_type, limit)
-        return _filter_products_by_pet_type(products, pet_type)
-    except Exception as exc:
-        logger.exception(
-            "guide_agent_product_search_fallback_failed",
-            extra={
-                "stage": "product_search_fallback",
-                "session_id": session_id,
-                "user_id": user_id,
-                "query": "",
-                "pet_type": pet_type,
-                "exception_type": type(exc).__name__,
-                "error": str(exc),
-            },
-        )
-        return []
+    return []
 
 
 async def _retrieve_rag_context(db: AsyncSession, user_id: int, session_id: int, query: str) -> tuple[str, str | None]:
@@ -336,6 +471,37 @@ async def _retrieve_rag_context(db: AsyncSession, user_id: int, session_id: int,
     if not lines:
         return "", None
     return "\n".join(lines), json.dumps(references, ensure_ascii=False)
+
+
+async def _resolve_guide_pet_summary(
+    db: AsyncSession,
+    user: User,
+    session: AgentSession,
+    guide_state: dict[str, Any],
+    content: str,
+) -> dict[str, Any] | None:
+    slots = _guide_slots(guide_state)
+    pet_id = session.pet_id or _safe_int(slots.get("pet_id"))
+    if pet_id is None:
+        pets = await list_pets(db, user.id)
+        for pet in pets:
+            pet_name = str(getattr(pet, "name", "") or "").strip()
+            if pet_name and pet_name in content:
+                pet_id = pet.id
+                session.pet_id = pet.id
+                slots["pet_id"] = pet.id
+                slots["pet_name"] = pet.name
+                slots["pet_type"] = pet.pet_type
+                break
+    if pet_id is None:
+        return None
+    pet_summary = await get_pet_detail_summary(db, user.id, pet_id)
+    slots["pet_id"] = pet_id
+    if pet_summary.get("name"):
+        slots["pet_name"] = pet_summary.get("name")
+    if pet_summary.get("pet_type"):
+        slots["pet_type"] = pet_summary.get("pet_type")
+    return pet_summary
 
 
 def _pick_allowed_recommendations(
@@ -461,26 +627,35 @@ async def send_guide_message(
     session_id: int,
     content: str,
     limit: int,
-) -> tuple[AgentMessage, AgentMessage, list[dict[str, Any]]]:
+) -> tuple[AgentMessage, AgentMessage, list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], bool]:
     session = await get_guide_session(db, user.id, session_id)
     risk_level = assess_guide_risk(content)
-    pet_summary = None
-    if session.pet_id is not None:
-        pet_summary = await get_pet_detail_summary(db, user.id, session.pet_id)
+    guide_state = _load_guide_state(session)
+    _merge_guide_state_from_content(guide_state, content)
+    pet_summary = await _resolve_guide_pet_summary(db, user, session, guide_state, content)
 
-    requested_pet_type = infer_pet_type_from_guide_query(content)
-    pet_type = requested_pet_type or (pet_summary.get("pet_type") if pet_summary else None)
-    products = await _search_product_candidates(
-        db,
-        content,
-        pet_type,
-        limit,
-        session_id=session_id,
-        user_id=user.id,
-        allow_empty_query_fallback=requested_pet_type is None,
-    )
-    rag_context, rag_references = await _retrieve_rag_context(db, user.id, session_id, content)
-    history_summary, recent_history = await _build_guide_history_context(session)
+    missing_slots = _missing_guide_slots(guide_state)
+    guide_state["missing_slots"] = missing_slots
+    guide_state["stage"] = "clarifying" if missing_slots else "searching"
+
+    products: list[dict[str, Any]] = []
+    rag_context = ""
+    rag_references = None
+    if not missing_slots:
+        slots = _guide_slots(guide_state)
+        requested_pet_type = infer_pet_type_from_guide_query(content)
+        pet_type = requested_pet_type or slots.get("pet_type") or (pet_summary.get("pet_type") if pet_summary else None)
+        products = await _search_product_candidates(
+            db,
+            content,
+            pet_type,
+            limit,
+            session_id=session_id,
+            user_id=user.id,
+        )
+        rag_context, rag_references = await _retrieve_rag_context(db, user.id, session_id, content)
+
+    history_summary, recent_history = await _build_guide_history_context(session, guide_state)
     workflow_result = await run_guide_agent_workflow(
         question=content,
         risk_level=risk_level,
@@ -489,10 +664,14 @@ async def send_guide_message(
         rag_context=rag_context,
         history=recent_history,
         history_summary=history_summary,
+        guide_state=guide_state,
         session_id=session_id,
     )
+    guide_state = workflow_result.get("guide_state") or guide_state
+    next_questions = workflow_result.get("next_questions", [])
+    requires_user_confirmation = bool(workflow_result.get("requires_user_confirmation"))
     picked = _pick_allowed_recommendations(
-        workflow_result.get("recommendations", []),
+        [] if requires_user_confirmation else workflow_result.get("recommendations", []),
         products,
         limit,
     )
@@ -511,6 +690,7 @@ async def send_guide_message(
         risk_level=risk_level,
         references=rag_references or workflow_result.get("references"),
     )
+    _save_guide_state(session, guide_state)
     db.add_all([user_message, assistant_message])
     await db.flush()
 
@@ -535,4 +715,4 @@ async def send_guide_message(
     await db.commit()
     await db.refresh(user_message)
     await db.refresh(assistant_message)
-    return user_message, assistant_message, hydrated
+    return user_message, assistant_message, hydrated, guide_state, next_questions, requires_user_confirmation
