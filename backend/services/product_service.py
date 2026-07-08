@@ -1,3 +1,7 @@
+import logging
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,6 +9,7 @@ from core.errors import bad_request, conflict, not_found
 from models.merchant import Merchant, MerchantFollow
 from models.base import utc_now
 from models.product import Product, ProductFavorite, ProductImage, ProductSku, ProductStatus
+from settings.config import get_settings
 from repository.product_repository import (
     category_has_children,
     get_category_by_id,
@@ -32,6 +37,9 @@ from schemas.product_schema import (
     ProductSkuUpsert,
     ProductUpdate,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _enabled_skus(product: Product) -> list[ProductSku]:
@@ -97,6 +105,69 @@ def _build_images(
         )
         for index, item in enumerate(payloads)
     ]
+
+
+def _product_image_urls(product: Product) -> set[str]:
+    urls = {image.image_url for image in product.images if image.image_url}
+    if product.cover_image:
+        urls.add(product.cover_image)
+    return urls
+
+
+def _generated_upload_path(url: str) -> Path | None:
+    if not url.startswith("/generated/uploads/"):
+        return None
+    relative_text = unquote(url.removeprefix("/generated/"))
+    relative_path = PurePosixPath(relative_text)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        return None
+
+    settings = get_settings()
+    uploads_root = (settings.public_asset_path / "uploads").resolve()
+    path = (settings.public_asset_path / Path(*relative_path.parts)).resolve()
+    try:
+        path.relative_to(uploads_root)
+    except ValueError:
+        return None
+    return path
+
+
+async def _is_product_image_url_referenced(db: AsyncSession, url: str) -> bool:
+    image_reference = await db.scalar(
+        select(ProductImage.id).where(ProductImage.image_url == url).limit(1)
+    )
+    if image_reference is not None:
+        return True
+    cover_reference = await db.scalar(
+        select(Product.id).where(Product.cover_image == url).limit(1)
+    )
+    return cover_reference is not None
+
+
+async def _cleanup_replaced_generated_product_images(
+    db: AsyncSession,
+    old_urls: set[str],
+    new_urls: set[str],
+) -> None:
+    for url in sorted(old_urls - new_urls):
+        path = _generated_upload_path(url)
+        if path is None:
+            continue
+        if await _is_product_image_url_referenced(db, url):
+            continue
+        try:
+            if path.exists() and path.is_file():
+                path.unlink()
+        except OSError as exc:
+            logger.warning(
+                "product_image_cleanup_failed",
+                extra={
+                    "image_url": url,
+                    "path": str(path),
+                    "exception_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
 
 
 async def _ensure_sku_code_available(
@@ -376,6 +447,17 @@ async def get_products_for_merchant(
     )
 
 
+async def get_product_for_merchant(
+    db: AsyncSession,
+    merchant_id: int,
+    product_id: int,
+) -> ProductDetailResponse:
+    product = await get_product_by_id(db, product_id)
+    if product is None or product.merchant_id != merchant_id:
+        raise not_found("Product not found")
+    return _product_detail(product, include_disabled_skus=True)
+
+
 async def create_merchant_product(
     db: AsyncSession,
     merchant_id: int,
@@ -420,6 +502,7 @@ async def update_merchant_product(
     }:
         raise bad_request("Product cannot be modified in current status")
 
+    old_image_urls = _product_image_urls(product) if payload.images is not None else set()
     data = payload.model_dump(exclude_unset=True, exclude={"skus", "images", "category_id"})
     for field, value in data.items():
         setattr(product, field, value)
@@ -438,6 +521,8 @@ async def update_merchant_product(
     product.submitted_at = None
     product.audited_at = None
     await db.commit()
+    if payload.images is not None:
+        await _cleanup_replaced_generated_product_images(db, old_image_urls, _product_image_urls(product))
     await db.refresh(product)
     return _product_detail(product, include_disabled_skus=True)
 

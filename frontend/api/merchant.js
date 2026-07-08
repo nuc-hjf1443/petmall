@@ -30,6 +30,10 @@ export const merchantApi = {
 	}),
 	dashboard: () => request({ url: '/merchants/me/dashboard', auth: true }),
 	products: () => request({ url: '/merchants/me/products', auth: true }),
+	product: productId => request({
+		url: `/merchants/me/products/${productId}`,
+		auth: true
+	}),
 	createProduct: data => request({
 		url: '/merchants/me/products',
 		method: 'POST',

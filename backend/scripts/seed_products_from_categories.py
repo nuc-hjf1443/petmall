@@ -20,6 +20,7 @@ from scripts.seed_categories import seed_categories
 
 
 DEFAULT_DATA_FILE = Path(__file__).resolve().parent / "data" / "category_products_seed.json"
+DEFAULT_MERCHANT_ID = 3
 
 
 def _load_seed_products(data_file: Path) -> list[dict[str, Any]]:
@@ -188,7 +189,7 @@ async def seed_products(
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Seed category-covered mock products.")
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_FILE)
-    parser.add_argument("--merchant-id", type=int, default=3001)
+    parser.add_argument("--merchant-id", type=int, default=DEFAULT_MERCHANT_ID)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
