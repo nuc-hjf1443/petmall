@@ -1,11 +1,6 @@
-import { request, setTokens } from './request'
+import { request } from './request'
 
 export const adminApi = {
-	async login(data) {
-		const tokens = await request({ url: '/admin/login', method: 'POST', data })
-		setTokens(tokens)
-		return tokens
-	},
 	users: () => request({ url: '/admin/users', auth: true }),
 	freezeUser: (userId, data = {}) => request({
 		url: `/admin/users/${userId}/freeze`,

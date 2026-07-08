@@ -163,10 +163,11 @@
 						<view v-else class="data-list">
 							<view v-for="item in reports" :key="item.id" class="data-row">
 								<view class="data-main">
-									<text class="data-title">{{ item.target_type }} #{{ item.target_id }}</text>
-									<text class="data-meta">举报人 {{ item.reporter_id }} · {{ item.reason }} · {{ reportStatusLabel(item) }}</text>
+									<text class="data-title">{{ item.target_user_nickname || '未设置昵称' }} · {{ item.target_user_phone || '手机号未知' }}</text>
+									<text class="data-meta">来源 {{ reportSourceLabel(item) }} · {{ reportStatusLabel(item) }}</text>
 								</view>
 								<text v-if="item.status !== 'pending'" class="status-chip">{{ reportActionLabel(item) }}</text>
+								<button class="secondary-button" @click="showReportDetail(item)">查看详情</button>
 								<button v-if="item.status === 'pending'" class="secondary-button" @click="resolveReport(item, 'dismiss')">驳回举报</button>
 								<button v-if="item.status === 'pending'" class="danger-button" @click="resolveReport(item, 'take_down')">下架内容</button>
 							</view>
@@ -280,11 +281,13 @@ export default {
 			try {
 				this.admin = await userApi.me()
 				if (!this.admin.is_admin) {
-					clearTokens()
-					return uni.reLaunch({ url: '/pages/admin/login' })
+					uni.showToast({ title: '您还不是管理员,拒绝访问!', icon: 'none' })
+					setTimeout(() => uni.reLaunch({ url: '/pages/profile/index' }), 800)
+					return
 				}
 			} catch (e) {
-				return uni.reLaunch({ url: '/pages/admin/login' })
+				this.loading = false
+				return
 			}
 
 			const result = await Promise.allSettled([
@@ -320,6 +323,23 @@ export default {
 		},
 		reportStatusLabel(item) {
 			return item.status === 'pending' ? '待处理' : this.reportActionLabel(item)
+		},
+		reportSourceLabel(item) {
+			return {
+				community_post: '社区动态',
+				community_comment: '社区评论',
+				post: '社区动态',
+				comment: '社区评论'
+			}[item.source_area || item.target_type] || '未知区域'
+		},
+		showReportDetail(item) {
+			const user = `${item.target_user_nickname || '未设置昵称'} / ${item.target_user_phone || '手机号未知'}`
+			const content = item.target_content || '无文本内容'
+			uni.showModal({
+				title: '举报详情',
+				content: `来源：${this.reportSourceLabel(item)}\n被举报人：${user}\n举报原因：${item.reason || '未填写'}\n举报内容：${content}`,
+				showCancel: false
+			})
 		},
 		reason(title, callback, required = false) {
 			uni.showModal({
@@ -429,7 +449,7 @@ export default {
 		},
 		logout() {
 			clearTokens()
-			uni.reLaunch({ url: '/pages/admin/login' })
+			uni.reLaunch({ url: '/pages/auth/login' })
 		},
 		home() {
 			uni.reLaunch({ url: '/pages/home/index' })

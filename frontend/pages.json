@@ -28,7 +28,6 @@
 		{ "path": "pages/adoption/my", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/merchant/index", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/merchant/product-edit", "style": { "navigationStyle": "custom" } },
-		{ "path": "pages/admin/login", "style": { "navigationStyle": "custom" } },
 		{ "path": "pages/admin/index", "style": { "navigationStyle": "custom" } }
 	],
 	"globalStyle": {
