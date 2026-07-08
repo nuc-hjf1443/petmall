@@ -19,19 +19,31 @@
 						<text class="pet-emoji">🐶</text><text class="pet-emoji cat">🐱</text>
 					</view>
 				</view>
+
 				<view class="pet-summary card">
-					<template v-if="pets.length">
-						<view class="pet-head">
-							<view class="pet-avatar">{{ petEmoji(pets[0].pet_type) }}</view>
-							<view><text class="pet-name">{{ pets[0].name }}</text><text class="pet-meta">{{ pets[0].breed || '可爱伙伴' }}</text></view>
-							<text class="manage" @click="go('/pages/pet/index')">管理 ></text>
-						</view>
-						<view class="pet-stats">
-							<view><text class="stat-value">{{ pets[0].weight || '--' }}</text><text>kg 体重</text></view>
-							<view><text class="stat-value">{{ pets[0].vaccine_status || '待完善' }}</text><text>疫苗</text></view>
-						</view>
-						<view class="health-tip">💚 今天也要记得陪它玩一会儿</view>
-					</template>
+					<swiper v-if="pets.length" class="pet-swiper" circular indicator-dots :autoplay="false">
+						<swiper-item v-for="pet in pets" :key="pet.id">
+							<view class="pet-slide">
+								<view class="pet-head">
+									<view class="pet-avatar">
+										<image v-if="pet.avatar" :src="assetUrl(pet.avatar)" mode="aspectFill" />
+										<text v-else>{{ petEmoji(pet.pet_type) }}</text>
+									</view>
+									<view class="pet-copy">
+										<text class="pet-name">{{ pet.name }}</text>
+										<text class="pet-meta">{{ pet.breed || '可爱伙伴' }}</text>
+									</view>
+									<text class="manage" @click.stop="go('/pages/pet/index')">管理 ></text>
+								</view>
+								<view class="pet-stats">
+									<view><text class="stat-value">{{ pet.weight || '--' }}</text><text>kg 体重</text></view>
+									<view><text class="stat-value">{{ pet.vaccine_status || '待完善' }}</text><text>疫苗</text></view>
+								</view>
+								<view class="health-tip">💚 今天也要记得陪它玩一会儿</view>
+								<view v-if="pets.length > 1" class="swipe-hint">左右滑动查看 {{ pets.length }} 只宠物</view>
+							</view>
+						</swiper-item>
+					</swiper>
 					<StatePanel v-else icon="🐾" title="建立宠物档案" description="记录健康与成长，获得更贴心的照护建议" action="立即添加" @action="go('/pages/pet/index')" />
 				</view>
 			</view>
@@ -105,7 +117,9 @@ export default {
 		assetUrl,
 		go(url) { uni.navigateTo({ url }) },
 		money: formatMoney,
-		petEmoji(type) { return String(type).toLowerCase().includes('cat') || type === '猫' ? '🐱' : '🐶' },
+		petEmoji(type) {
+			return String(type || '').toLowerCase().includes('cat') || String(type || '').includes('猫') ? '🐱' : '🐶'
+		},
 		async load() {
 			const jobs = [
 				productApi.list({ page: 1, page_size: 4 }).then(res => { if (res?.items?.length) this.products = res.items }).catch(() => {}),
@@ -134,15 +148,20 @@ export default {
 .hero-button { margin:26px 0 0; padding:0 25px; border-radius:22px; background:var(--color-primary); color:#fff; font-size:14px; }
 .pet-visual { position:absolute; right:6%; bottom:14%; z-index:1; display:flex; align-items:flex-end; }
 .pet-emoji { font-size:120px; filter:drop-shadow(0 15px 12px rgba(93,54,22,.12)); }.pet-emoji.cat { margin-left:-25px; font-size:105px; }
-.pet-summary { padding:22px; }
-.pet-head { display:flex; align-items:center; gap:12px; }
-.pet-avatar { display:flex; width:58px; height:58px; align-items:center; justify-content:center; border-radius:50%; background:#fff0df; font-size:35px; }
-.pet-name,.pet-meta { display:block; }.pet-name { font-size:18px; font-weight:700; }.pet-meta { margin-top:5px; color:var(--color-text-secondary); font-size:12px; }
-.manage { margin-left:auto; color:var(--color-primary); font-size:12px; }
-.pet-stats { display:grid; grid-template-columns:1fr 1fr; margin:24px 0; }
-.pet-stats view { display:flex; flex-direction:column; align-items:center; gap:5px; color:var(--color-text-secondary); font-size:11px; }
+.pet-summary { min-height:330px; padding:0; overflow:hidden; }
+.pet-swiper { width:100%; height:330px; }
+.pet-slide { display:flex; height:100%; flex-direction:column; padding:28px 26px 36px; box-sizing:border-box; }
+.pet-head { display:flex; min-width:0; align-items:center; gap:14px; }
+.pet-avatar { display:flex; width:64px; height:64px; flex:none; align-items:center; justify-content:center; overflow:hidden; border-radius:50%; background:#fff0df; font-size:34px; }
+.pet-avatar image { display:block; width:100%; height:100%; }
+.pet-copy { min-width:0; flex:1; }
+.pet-name,.pet-meta { display:block; }.pet-name { overflow:hidden; font-size:20px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }.pet-meta { overflow:hidden; margin-top:5px; color:var(--color-text-secondary); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.manage { flex:none; color:var(--color-primary); font-size:12px; }
+.pet-stats { display:grid; grid-template-columns:1fr 1fr; margin:28px 0 18px; }
+.pet-stats view { display:flex; min-width:0; flex-direction:column; align-items:center; gap:5px; color:var(--color-text-secondary); font-size:11px; }
 .pet-stats view+view { border-left:1px solid var(--color-border); }.stat-value { color:var(--color-text); font-size:17px; font-weight:700; }
 .health-tip { padding:14px; border-radius:12px; background:#f0faf4; color:#43815e; font-size:12px; }
+.swipe-hint { margin-top:10px; color:var(--color-text-secondary); text-align:center; font-size:10px; }
 .quick-grid { display:grid; grid-template-columns:repeat(8,1fr); margin-top:18px; padding:20px 16px; border:1px solid var(--color-border); border-radius:18px; background:#fff; }
 .quick-item { display:flex; flex-direction:column; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
 .quick-icon { display:flex; width:48px; height:48px; align-items:center; justify-content:center; border-radius:15px; color:var(--color-primary); font-weight:800; }
@@ -159,7 +178,7 @@ export default {
 	.mobile-topbar { display:flex; align-items:center; justify-content:space-between; padding:8px 2px 12px; }
 	.city,.hello { display:block; }.city { font-size:18px; font-weight:800; }.hello { margin-top:3px; color:var(--color-text-secondary); font-size:11px; }.top-actions { font-size:18px; }
 	.mobile-search { display:block; height:40px; margin-bottom:12px; padding:0 14px; border-radius:20px; background:#fff; color:#9b948e; font-size:13px; line-height:40px; }
-	.hero-grid { display:block; }.pet-summary { margin-top:12px; }
+	.hero-grid { display:block; }.pet-summary { min-height:260px; margin-top:12px; }.pet-swiper { height:260px; }.pet-slide { padding:22px 18px 30px; }
 	.hero { min-height:190px; padding:24px 22px; border-radius:18px; }.hero-copy { width:67%; }.eyebrow { font-size:10px; }.hero-title { margin-top:11px; font-size:25px; }.hero-subtitle { margin-top:8px; font-size:12px; line-height:1.5; }.hero-button { height:32px; margin-top:14px; padding:0 15px; font-size:11px; line-height:32px; }
 	.pet-visual { right:0; bottom:11%; }.pet-emoji { font-size:65px; }.pet-emoji.cat { margin-left:-18px; font-size:55px; }
 	.quick-grid { grid-template-columns:repeat(4,1fr); row-gap:18px; padding:18px 4px; }.quick-item { font-size:11px; }.quick-icon { width:42px; height:42px; }

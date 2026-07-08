@@ -59,6 +59,7 @@
 							<text class="history-clock">○</text>
 							<text class="history-title">{{ historyTitle(item) }}</text>
 							<text class="history-time">{{ formatTime(item.latest_message_at || item.updated_at) }}</text>
+							<button class="history-delete" @click.stop="deleteHistory(item)">删除</button>
 						</view>
 					</view>
 				</view>
@@ -261,6 +262,27 @@ export default {
 			} catch (error) {
 				uni.showToast({ title: '历史会话加载失败', icon: 'none' })
 			}
+		},
+		async deleteHistory(item) {
+			if (this.sending) return
+			uni.showModal({
+				title: '删除历史对话',
+				content: '删除后不可恢复，确认删除这条导购对话吗？',
+				success: async result => {
+					if (!result.confirm) return
+					try {
+						await aiApi.deleteSession(item.id, { agent_type: 'guide' })
+						this.historySessions = this.historySessions.filter(session => session.id !== item.id)
+						if (this.sessionId === item.id) {
+							this.reset()
+						}
+						uni.showToast({ title: '已删除', icon: 'success' })
+						this.loadHistory()
+					} catch (error) {
+						uni.showToast({ title: error.message || '删除失败', icon: 'none' })
+					}
+				}
+			})
 		},
 		scroll() {
 			this.$nextTick(() => {
@@ -546,7 +568,7 @@ export default {
 }
 .history-item {
 	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr) 58px;
+	grid-template-columns: 18px minmax(0, 1fr) 58px 42px;
 	gap: 6px;
 	align-items: center;
 	margin-top: 8px;
@@ -560,6 +582,17 @@ export default {
 .history-item:hover { background: var(--color-primary-soft); }
 .history-clock,
 .history-time { color: var(--color-text-secondary); }
+.history-delete {
+	height: 24px;
+	margin: 0;
+	padding: 0;
+	border: 1px solid #ffd7cf;
+	border-radius: 12px;
+	background: #fff7f4;
+	color: #c34838;
+	font-size: 10px;
+	line-height: 22px;
+}
 .history-title {
 	overflow: hidden;
 	color: var(--color-text);

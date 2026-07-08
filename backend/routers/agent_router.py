@@ -27,6 +27,7 @@ from services.qa_agent_service import (
     complete_qa_message,
     create_qa_session,
     delete_qa_session,
+    delete_user_session,
     get_user_session,
     list_qa_sessions,
     list_user_sessions,
@@ -132,6 +133,17 @@ async def list_agent_sessions(
         page=page,
         page_size=page_size,
     )
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_agent_session(
+    session_id: int,
+    agent_type: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await delete_user_session(db, current_user.id, session_id, agent_type=agent_type)
+    return {"message": "Agent session deleted"}
 
 
 @router.post("/guide/sessions/{session_id}/messages", response_model=GuideAnswerResponse)

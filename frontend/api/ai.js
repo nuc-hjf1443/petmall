@@ -43,6 +43,11 @@ export const aiApi = {
 		url: `/agents/sessions/${sessionId}`,
 		auth: true
 	}),
+	deleteSession: (sessionId, data = {}) => request({
+		url: `/agents/sessions/${sessionId}${data.agent_type ? `?agent_type=${encodeURIComponent(data.agent_type)}` : ''}`,
+		method: 'DELETE',
+		auth: true
+	}),
 	guideRecommendations: sessionId => request({
 		url: `/agents/guide/sessions/${sessionId}/recommendations`,
 		auth: true
@@ -53,7 +58,6 @@ export const aiApi = {
 export const agentApi = {
 	createSession: (data = {}) => aiApi.createQaSession(data),
 	listSessions: aiApi.listQaSessions,
-	deleteSession: aiApi.deleteQaSession,
 	send: (sessionId, content, asyncMode = false) => aiApi.sendQaMessage(sessionId, { content, async_mode: asyncMode }),
 	createQaSession: aiApi.createQaSession,
 	listQaSessions: aiApi.listQaSessions,
@@ -62,6 +66,7 @@ export const agentApi = {
 	createGuideSession: aiApi.createGuideSession,
 	sendGuideMessage: aiApi.sendGuideMessage,
 	sessions: aiApi.sessions,
+	deleteSession: aiApi.deleteSession,
 	guideRecommendations: aiApi.guideRecommendations,
 	session: aiApi.session
 }
