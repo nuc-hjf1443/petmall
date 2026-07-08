@@ -15,8 +15,9 @@ from models.knowledge import (
 )
 from models.base import utc_now
 from repository.knowledge_repository import (
-    delete_document_chunks, get_private_document, get_private_kb, get_task,
-    list_documents, list_private_kbs,
+    delete_document_chunks, get_platform_document, get_platform_kb,
+    get_private_document, get_private_kb, get_task, list_documents,
+    list_platform_documents, list_private_kbs,
 )
 from schemas.knowledge_schema import (
     GeneratedPreviewResponse, KnowledgeBaseCreate, KnowledgeBaseResponse, KnowledgeDocumentResponse
@@ -52,6 +53,35 @@ def _kb_response(kb: KnowledgeBase) -> KnowledgeBaseResponse:
 
 def _doc_response(doc: KnowledgeDocument) -> KnowledgeDocumentResponse:
     return KnowledgeDocumentResponse.model_validate(doc, from_attributes=True)
+
+
+def _platform_knowledge_dir() -> Path:
+    directory = get_settings().private_asset_path / "knowledge" / "platform"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+async def _ensure_platform_kb(db: AsyncSession) -> KnowledgeBase:
+    knowledge_base = await get_platform_kb(db)
+    if knowledge_base is None:
+        knowledge_base = KnowledgeBase(user_id=None, name="Platform knowledge", scope="platform")
+        db.add(knowledge_base)
+        await db.flush()
+    return knowledge_base
+
+
+async def _store_upload_file(upload: UploadFile, directory: Path) -> tuple[str, str, Path]:
+    file_type = ALLOWED_DOCUMENTS.get(upload.content_type or "")
+    extension = Path(upload.filename or "").suffix.lower()
+    if file_type is None or extension != f".{file_type}":
+        raise bad_request("Only matching TXT and PDF files are supported")
+    limit = get_settings().max_upload_size_mb * 1024 * 1024
+    data = await upload.read(limit + 1)
+    if not data or len(data) > limit:
+        raise bad_request("Document is empty or too large")
+    path = directory / f"{uuid4().hex}.{file_type}"
+    path.write_bytes(data)
+    return Path(upload.filename or "document").name, file_type, path
 
 
 async def create_knowledge_base(db: AsyncSession, user_id: int, payload: KnowledgeBaseCreate):
@@ -102,20 +132,11 @@ async def upload_document(
 ):
     if await get_private_kb(db, kb_id, user_id) is None:
         raise not_found("Knowledge base not found")
-    file_type = ALLOWED_DOCUMENTS.get(upload.content_type or "")
-    extension = Path(upload.filename or "").suffix.lower()
-    if file_type is None or extension != f".{file_type}":
-        raise bad_request("Only matching TXT and PDF files are supported")
-    limit = get_settings().max_upload_size_mb * 1024 * 1024
-    data = await upload.read(limit + 1)
-    if not data or len(data) > limit:
-        raise bad_request("Document is empty or too large")
     directory = get_settings().private_asset_path / "knowledge" / str(user_id)
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{uuid4().hex}.{file_type}"
-    path.write_bytes(data)
+    file_name, file_type, path = await _store_upload_file(upload, directory)
     document = KnowledgeDocument(
-        knowledge_base_id=kb_id, user_id=user_id, file_name=Path(upload.filename or "document").name,
+        knowledge_base_id=kb_id, user_id=user_id, file_name=file_name,
         file_type=file_type, file_path=str(path), source_type="upload",
         parse_status=DocumentStatus.PENDING.value,
     )
@@ -213,6 +234,107 @@ async def create_platform_knowledge_document(
     await db.refresh(document)
     await _new_task(db, document, "index", publisher)
     return _doc_response(document)
+
+
+async def get_platform_knowledge_base(db: AsyncSession) -> KnowledgeBaseResponse:
+    knowledge_base = await _ensure_platform_kb(db)
+    await db.commit()
+    await db.refresh(knowledge_base)
+    return _kb_response(knowledge_base)
+
+
+async def get_platform_documents(db: AsyncSession) -> list[KnowledgeDocumentResponse]:
+    knowledge_base = await _ensure_platform_kb(db)
+    await db.commit()
+    return [_doc_response(doc) for doc in await list_platform_documents(db, knowledge_base.id)]
+
+
+async def upload_platform_document(
+    db: AsyncSession, upload: UploadFile, publisher: KnowledgeTaskPublisher
+) -> KnowledgeDocumentResponse:
+    knowledge_base = await _ensure_platform_kb(db)
+    file_name, file_type, path = await _store_upload_file(upload, _platform_knowledge_dir())
+    document = KnowledgeDocument(
+        knowledge_base_id=knowledge_base.id,
+        user_id=None,
+        file_name=file_name,
+        file_type=file_type,
+        file_path=str(path),
+        source_type="platform_upload",
+        parse_status=DocumentStatus.PENDING.value,
+    )
+    try:
+        db.add(document)
+        await db.commit()
+        await db.refresh(document)
+        await _new_task(db, document, "index", publisher)
+        return _doc_response(document)
+    except Exception:
+        await db.rollback()
+        if document.id is None:
+            path.unlink(missing_ok=True)
+        raise
+
+
+async def replace_platform_document(
+    db: AsyncSession, document_id: int, upload: UploadFile, publisher: KnowledgeTaskPublisher
+) -> KnowledgeDocumentResponse:
+    document = await get_platform_document(db, document_id, lock=True)
+    if document is None:
+        raise not_found("Platform document not found")
+    if document.parse_status in {DocumentStatus.PROCESSING.value, DocumentStatus.DELETING.value}:
+        raise conflict("Document is busy")
+    file_name, file_type, path = await _store_upload_file(upload, _platform_knowledge_dir())
+    old_path = Path(document.file_path)
+    try:
+        document.file_name = file_name
+        document.file_type = file_type
+        document.file_path = str(path)
+        document.source_type = "platform_upload"
+        document.pet_id = None
+        document.source_snapshot = None
+        document.index_version += 1
+        document.parse_status = DocumentStatus.PENDING.value
+        document.error_message = None
+        await db.commit()
+        await db.refresh(document)
+        await _new_task(db, document, "reindex", publisher)
+        old_path.unlink(missing_ok=True)
+        return _doc_response(document)
+    except Exception:
+        await db.rollback()
+        path.unlink(missing_ok=True)
+        raise
+
+
+async def reindex_platform_document(
+    db: AsyncSession, document_id: int, publisher: KnowledgeTaskPublisher
+) -> KnowledgeDocumentResponse:
+    document = await get_platform_document(db, document_id, lock=True)
+    if document is None:
+        raise not_found("Platform document not found")
+    if document.parse_status in {DocumentStatus.PROCESSING.value, DocumentStatus.DELETING.value}:
+        raise conflict("Document is busy")
+    document.index_version += 1
+    document.parse_status = DocumentStatus.PENDING.value
+    document.error_message = None
+    await db.commit()
+    await _new_task(db, document, "reindex", publisher)
+    return _doc_response(document)
+
+
+async def delete_platform_document(
+    db: AsyncSession, document_id: int, publisher: KnowledgeTaskPublisher
+) -> None:
+    document = await get_platform_document(db, document_id, lock=True)
+    if document is None:
+        raise not_found("Platform document not found")
+    if document.parse_status == DocumentStatus.DELETING.value:
+        return
+    document.parse_status = DocumentStatus.DELETING.value
+    document.index_version += 1
+    await db.commit()
+    await _new_task(db, document, "delete", publisher)
 
 
 async def get_documents(db: AsyncSession, user_id: int, kb_id: int):

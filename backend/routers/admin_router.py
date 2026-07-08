@@ -1,9 +1,10 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import get_db, require_admin
+from core.knowledge_queue import KnowledgeTaskPublisher, get_knowledge_task_publisher
 from models.user import User
 from schemas.admin_schema import (
     AdminLoginResponse,
@@ -16,6 +17,7 @@ from schemas.admin_schema import (
     AdminReportResolveRequest,
     AdminUserResponse,
 )
+from schemas.knowledge_schema import KnowledgeBaseResponse, KnowledgeDocumentResponse
 from schemas.auth_schema import LoginRequest
 from services.admin_service import (
     admin_login,
@@ -30,6 +32,14 @@ from services.admin_service import (
 )
 from services.audit_service import write_audit_log
 from services.community_service import list_reports, resolve_report
+from services.knowledge_service import (
+    delete_platform_document,
+    get_platform_documents,
+    get_platform_knowledge_base,
+    reindex_platform_document,
+    replace_platform_document,
+    upload_platform_document,
+)
 from services.product_service import get_pending_products_for_audit, update_product_audit_status
 from models.product import ProductStatus
 
@@ -156,6 +166,64 @@ async def admin_orders_trend(
     db: AsyncSession = Depends(get_db),
 ) -> AdminOrderTrendResponse:
     return await get_admin_order_trend(db, days=days)
+
+
+@router.get("/knowledge/platform", response_model=KnowledgeBaseResponse)
+async def admin_platform_knowledge_base(
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeBaseResponse:
+    return await get_platform_knowledge_base(db)
+
+
+@router.get("/knowledge/platform/documents", response_model=list[KnowledgeDocumentResponse])
+async def admin_platform_knowledge_documents(
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[KnowledgeDocumentResponse]:
+    return await get_platform_documents(db)
+
+
+@router.post("/knowledge/platform/documents", response_model=KnowledgeDocumentResponse)
+async def admin_upload_platform_knowledge_document(
+    file: UploadFile = File(...),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    publisher: KnowledgeTaskPublisher = Depends(get_knowledge_task_publisher),
+) -> KnowledgeDocumentResponse:
+    return await upload_platform_document(db, file, publisher)
+
+
+@router.put("/knowledge/platform/documents/{document_id}", response_model=KnowledgeDocumentResponse)
+async def admin_replace_platform_knowledge_document(
+    document_id: int,
+    file: UploadFile = File(...),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    publisher: KnowledgeTaskPublisher = Depends(get_knowledge_task_publisher),
+) -> KnowledgeDocumentResponse:
+    return await replace_platform_document(db, document_id, file, publisher)
+
+
+@router.post("/knowledge/platform/documents/{document_id}/reindex", response_model=KnowledgeDocumentResponse)
+async def admin_reindex_platform_knowledge_document(
+    document_id: int,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    publisher: KnowledgeTaskPublisher = Depends(get_knowledge_task_publisher),
+) -> KnowledgeDocumentResponse:
+    return await reindex_platform_document(db, document_id, publisher)
+
+
+@router.delete("/knowledge/platform/documents/{document_id}")
+async def admin_delete_platform_knowledge_document(
+    document_id: int,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    publisher: KnowledgeTaskPublisher = Depends(get_knowledge_task_publisher),
+) -> dict[str, str]:
+    await delete_platform_document(db, document_id, publisher)
+    return {"message": "Platform document deletion scheduled"}
 
 
 @router.get("/products/pending")

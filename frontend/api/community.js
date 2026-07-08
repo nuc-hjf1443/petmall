@@ -3,10 +3,11 @@ import { request, upload } from './request'
 export const communityApi = {
 	list: (params = {}) => request({ url: '/posts', data: params }),
 
-	publish({ content, topicIds = [], filePaths = [] }) {
+	publish({ content, topicIds = [], topicNames = [], filePaths = [] }) {
 		const formData = {
 			...(content ? { content } : {}),
-			...(topicIds.length ? { topic_ids: JSON.stringify(topicIds) } : {})
+			...(topicIds.length ? { topic_ids: JSON.stringify(topicIds) } : {}),
+			...(topicNames.length ? { topic_names: JSON.stringify(topicNames) } : {})
 		}
 		if (!filePaths.length) {
 			return request({

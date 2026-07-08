@@ -3,11 +3,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.dependencies import get_current_user, get_db
+from core.dependencies import get_current_user, get_db, get_optional_current_user
 from models.user import User
 from schemas.product_schema import (
     ProductCategoryResponse,
     ProductDetailResponse,
+    ProductFavoriteListResponse,
     ProductListResponse,
     ProductReviewCreate,
     ProductReviewListResponse,
@@ -19,7 +20,13 @@ from services.review_service import (
     get_product_reviews,
     get_review_purchase_verifier,
 )
-from services.product_service import get_categories, get_product_detail, get_products
+from services.product_service import (
+    get_categories,
+    get_product_detail,
+    get_products,
+    list_product_favorites,
+    set_product_favorite,
+)
 
 
 router = APIRouter(tags=["products"])
@@ -57,12 +64,43 @@ async def list_products(
     )
 
 
+@router.get("/products/favorites", response_model=ProductFavoriteListResponse)
+async def my_product_favorites(
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProductFavoriteListResponse:
+    return await list_product_favorites(db, current_user.id, page=page, page_size=page_size)
+
+
 @router.get("/products/{product_id}", response_model=ProductDetailResponse)
 async def get_product(
     product_id: int,
+    current_user: User | None = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProductDetailResponse:
-    return await get_product_detail(db, product_id)
+    return await get_product_detail(db, product_id, current_user.id if current_user else None)
+
+
+@router.post("/products/{product_id}/favorite")
+async def favorite_product(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await set_product_favorite(db, current_user.id, product_id, True)
+    return {"message": "Product favorited"}
+
+
+@router.delete("/products/{product_id}/favorite")
+async def unfavorite_product(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await set_product_favorite(db, current_user.id, product_id, False)
+    return {"message": "Product unfavorited"}
 
 
 @router.get(

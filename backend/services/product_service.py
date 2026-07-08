@@ -1,8 +1,10 @@
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.errors import bad_request, conflict, not_found
+from models.merchant import Merchant, MerchantFollow
 from models.base import utc_now
-from models.product import Product, ProductImage, ProductSku, ProductStatus
+from models.product import Product, ProductFavorite, ProductImage, ProductSku, ProductStatus
 from repository.product_repository import (
     category_has_children,
     get_category_by_id,
@@ -20,10 +22,13 @@ from repository.product_repository import (
 from schemas.product_schema import (
     ProductCreate,
     ProductDetailResponse,
+    ProductFavoriteListResponse,
     ProductImageInput,
     ProductImageResponse,
+    ProductMerchantSummary,
     ProductListResponse,
     ProductSkuResponse,
+    ProductSummaryResponse,
     ProductSkuUpsert,
     ProductUpdate,
 )
@@ -38,6 +43,9 @@ def _product_detail(
     *,
     in_stock_skus_only: bool = False,
     include_disabled_skus: bool = False,
+    merchant: Merchant | None = None,
+    favorited_by_me: bool = False,
+    following_merchant: bool = False,
 ) -> ProductDetailResponse:
     skus = list(product.skus) if include_disabled_skus else _enabled_skus(product)
     if in_stock_skus_only:
@@ -57,6 +65,14 @@ def _product_detail(
         applicable_pet_type=product.applicable_pet_type,
         skus=[ProductSkuResponse.model_validate(sku) for sku in skus],
         images=[ProductImageResponse.model_validate(image) for image in product.images],
+        merchant=ProductMerchantSummary(
+            id=merchant.id,
+            owner_user_id=merchant.owner_user_id,
+            shop_name=merchant.shop_name,
+            status=merchant.status,
+        ) if merchant else None,
+        favorited_by_me=favorited_by_me,
+        following_merchant=following_merchant,
         audit_reason=product.audit_reason,
         submitted_at=product.submitted_at,
         audited_at=product.audited_at,
@@ -238,11 +254,111 @@ async def get_products(
     return ProductListResponse(items=products, total=total, page=page, page_size=page_size)
 
 
-async def get_product_detail(db: AsyncSession, product_id: int) -> ProductDetailResponse:
+async def get_product_detail(
+    db: AsyncSession,
+    product_id: int,
+    current_user_id: int | None = None,
+) -> ProductDetailResponse:
     product = await get_public_product_by_id(db, product_id)
     if product is None:
         raise not_found("Product not found")
-    return _product_detail(product)
+    merchant = await db.get(Merchant, product.merchant_id)
+    favorited_by_me = False
+    following_merchant = False
+    if current_user_id is not None:
+        favorited_by_me = await db.scalar(
+            select(ProductFavorite.id).where(
+                ProductFavorite.user_id == current_user_id,
+                ProductFavorite.product_id == product.id,
+            )
+        ) is not None
+        following_merchant = await db.scalar(
+            select(MerchantFollow.id).where(
+                MerchantFollow.user_id == current_user_id,
+                MerchantFollow.merchant_id == product.merchant_id,
+            )
+        ) is not None
+    return _product_detail(
+        product,
+        merchant=merchant,
+        favorited_by_me=favorited_by_me,
+        following_merchant=following_merchant,
+    )
+
+
+async def set_product_favorite(db: AsyncSession, user_id: int, product_id: int, enabled: bool) -> None:
+    product = await get_public_product_by_id(db, product_id)
+    if product is None:
+        raise not_found("Product not found")
+    existing = await db.scalar(
+        select(ProductFavorite).where(
+            ProductFavorite.user_id == user_id,
+            ProductFavorite.product_id == product_id,
+        )
+    )
+    if enabled and existing is None:
+        db.add(ProductFavorite(user_id=user_id, product_id=product_id))
+    elif not enabled and existing is not None:
+        await db.delete(existing)
+    await db.commit()
+
+
+async def list_product_favorites(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+) -> ProductFavoriteListResponse:
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    filters = [
+        ProductFavorite.user_id == user_id,
+        Product.status == ProductStatus.ON_SALE.value,
+    ]
+    total = int(
+        (
+            await db.scalar(
+                select(func.count(ProductFavorite.id))
+                .join(Product, Product.id == ProductFavorite.product_id)
+                .where(*filters)
+            )
+        )
+        or 0
+    )
+    result = await db.execute(
+        select(Product)
+        .join(ProductFavorite, ProductFavorite.product_id == Product.id)
+        .where(*filters)
+        .order_by(ProductFavorite.created_at.desc(), ProductFavorite.id.desc())
+        .offset((safe_page - 1) * safe_page_size)
+        .limit(safe_page_size)
+    )
+    return ProductFavoriteListResponse(
+        items=[ProductSummaryResponse.model_validate(item) for item in result.scalars()],
+        total=total,
+        page=safe_page,
+        page_size=safe_page_size,
+    )
+
+
+async def set_merchant_follow(db: AsyncSession, user_id: int, merchant_id: int, enabled: bool) -> None:
+    merchant = await db.get(Merchant, merchant_id)
+    if merchant is None or merchant.status != "approved":
+        raise not_found("Merchant not found")
+    if merchant.owner_user_id == user_id:
+        raise bad_request("不能关注自己的店铺")
+    existing = await db.scalar(
+        select(MerchantFollow).where(
+            MerchantFollow.user_id == user_id,
+            MerchantFollow.merchant_id == merchant_id,
+        )
+    )
+    if enabled and existing is None:
+        db.add(MerchantFollow(user_id=user_id, merchant_id=merchant_id))
+    elif not enabled and existing is not None:
+        await db.delete(existing)
+    await db.commit()
 
 
 async def get_products_for_merchant(

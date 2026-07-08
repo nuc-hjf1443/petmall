@@ -18,6 +18,16 @@ export const merchantApi = {
 		data,
 		auth: true
 	}),
+	follow: merchantId => request({
+		url: `/merchants/${merchantId}/follow`,
+		method: 'POST',
+		auth: true
+	}),
+	unfollow: merchantId => request({
+		url: `/merchants/${merchantId}/follow`,
+		method: 'DELETE',
+		auth: true
+	}),
 	dashboard: () => request({ url: '/merchants/me/dashboard', auth: true }),
 	products: () => request({ url: '/merchants/me/products', auth: true }),
 	createProduct: data => request({

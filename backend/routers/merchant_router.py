@@ -32,6 +32,7 @@ from services.merchant_product_service import (
     submit_merchant_product,
     update_product_for_merchant,
 )
+from services.product_service import set_merchant_follow
 
 
 router = APIRouter(tags=["merchants"])
@@ -61,6 +62,26 @@ async def update_merchant_me(
     db: AsyncSession = Depends(get_db),
 ) -> Merchant:
     return await update_my_merchant(db, current_user.id, payload)
+
+
+@router.post("/merchants/{merchant_id}/follow")
+async def follow_merchant(
+    merchant_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await set_merchant_follow(db, current_user.id, merchant_id, True)
+    return {"message": "Merchant followed"}
+
+
+@router.delete("/merchants/{merchant_id}/follow")
+async def unfollow_merchant(
+    merchant_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await set_merchant_follow(db, current_user.id, merchant_id, False)
+    return {"message": "Merchant unfollowed"}
 
 
 @router.get("/merchants/me/dashboard", response_model=MerchantDashboardResponse)

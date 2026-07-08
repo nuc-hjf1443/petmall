@@ -1,4 +1,4 @@
-<template>
+﻿<template>
 	<view class="admin-shell">
 		<view class="admin-bar">
 			<view>
@@ -205,6 +205,58 @@
 							</view>
 						</view>
 					</view>
+
+					<view v-else-if="tab === 'knowledge'" class="card panel">
+						<view class="panel-heading">
+							<view>
+								<text class="panel-title">平台知识库文件</text>
+								<text class="data-meta">用于没有私人知识库时的默认问答资料，也会与私人知识联合检索</text>
+							</view>
+							<button class="action-button" @click="choosePlatformKnowledgeDocument">上传文件</button>
+						</view>
+						<StatePanel v-if="!platformDocuments.length" icon="-" title="暂无平台知识文件" />
+						<view v-else class="data-list">
+							<view v-for="item in platformDocuments" :key="item.id" class="data-row">
+								<view class="data-main">
+									<text class="data-title">{{ item.file_name }}</text>
+									<text class="data-meta">{{ item.file_type }} · {{ item.parse_status }} · {{ item.chunk_count }} 个分块 · v{{ item.index_version }}</text>
+									<text v-if="item.error_message" class="error-text">{{ item.error_message }}</text>
+								</view>
+								<text class="status-chip">{{ item.source_type }}</text>
+								<button class="secondary-button" @click="choosePlatformKnowledgeReplacement(item)">替换</button>
+								<button class="secondary-button" @click="reindexPlatformKnowledge(item)">重建索引</button>
+								<button class="danger-button" @click="deletePlatformKnowledge(item)">删除</button>
+							</view>
+						</view>
+					</view>
+
+					<view v-else-if="tab === 'support'" class="card panel support-panel">
+						<view class="panel-heading">
+							<view>
+								<text class="panel-title">平台客服</text>
+								<text class="data-meta">处理用户平台咨询，以及商家移交给平台的客服会话。</text>
+							</view>
+							<button class="secondary-button" @click="loadSupport">刷新</button>
+						</view>
+						<view class="support-tabs">
+							<view class="support-tab" :class="{ active: supportFilter === 'pending' }" @click="setSupportFilter('pending')">未处理</view>
+							<view class="support-tab" :class="{ active: supportFilter === 'resolved' }" @click="setSupportFilter('resolved')">已处理</view>
+						</view>
+						<StatePanel v-if="!supportConversations.length" icon="-" title="暂无客服会话" />
+						<view v-else class="support-list">
+							<view v-for="item in supportConversations" :key="item.id" class="support-row">
+								<view class="support-main">
+									<text class="data-title">{{ supportTitle(item) }}</text>
+									<text class="data-meta">{{ item.messages?.slice(-1)[0]?.content || '暂无消息' }}</text>
+								</view>
+								<view class="support-actions">
+									<text class="status-chip" :class="{ resolved: item.status === 'resolved' }">{{ item.status === 'resolved' ? '已处理' : '未处理' }}</text>
+									<button class="secondary-button" @click="openSupport(item)">打开</button>
+									<button class="secondary-button" @click="setSupportStatus(item, item.status === 'resolved' ? 'pending' : 'resolved')">{{ item.status === 'resolved' ? '标记未处理' : '标记已处理' }}</button>
+								</view>
+							</view>
+						</view>
+					</view>
 				</view>
 			</scroll-view>
 		</view>
@@ -213,7 +265,7 @@
 
 <script>
 import StatePanel from '../../components/StatePanel.vue'
-import { adminApi, productApi, userApi, walletApi, clearTokens } from '../../api'
+import { adminApi, productApi, supportApi, userApi, walletApi, clearTokens } from '../../api'
 import { formatMoney } from '../../utils/format'
 
 export default {
@@ -233,6 +285,10 @@ export default {
 			reports: [],
 			adoptions: [],
 			withdrawals: [],
+			platformKnowledge: null,
+			platformDocuments: [],
+			supportConversations: [],
+			supportFilter: 'pending',
 			tabs: [
 				{ key: 'dashboard', icon: 'D', label: '数据面板', desc: '平台待办和经营概览' },
 				{ key: 'users', icon: 'U', label: '用户管理', desc: '账号状态与冻结管理' },
@@ -242,7 +298,9 @@ export default {
 				{ key: 'merchants', icon: 'M', label: '商家审核', desc: '审核商家入驻申请' },
 				{ key: 'content', icon: 'C', label: '内容审核', desc: '处理社区内容举报' },
 				{ key: 'adoptions', icon: 'R', label: '领养审核', desc: '审核用户领养申请' },
-				{ key: 'withdrawals', icon: 'W', label: '提现审核', desc: '模拟打款与余额扣减审核' }
+				{ key: 'withdrawals', icon: 'W', label: '提现审核', desc: '模拟打款与余额扣减审核' },
+				{ key: 'support', icon: 'S', label: '平台客服', desc: '处理平台客服与商家移交会话' },
+				{ key: 'knowledge', icon: 'K', label: '知识库', desc: '平台知识文件与索引维护' }
 			]
 		}
 	},
@@ -300,7 +358,10 @@ export default {
 				adminApi.orders({ page: 1, page_size: 100 }),
 				adminApi.statisticsOverview(),
 				productApi.list({ page: 1, page_size: 100 }),
-				walletApi.adminWithdrawals({ page: 1, page_size: 100 })
+				walletApi.adminWithdrawals({ page: 1, page_size: 100 }),
+				adminApi.platformKnowledge(),
+				adminApi.platformKnowledgeDocuments(),
+				supportApi.adminList({ status: this.supportFilter, page: 1, page_size: 100 })
 			])
 			if (result[0].status === 'fulfilled') this.users = result[0].value || []
 			if (result[1].status === 'fulfilled') this.products = result[1].value?.items || []
@@ -312,7 +373,70 @@ export default {
 			if (result[7].status === 'fulfilled') this.overview = result[7].value || {}
 			if (result[8].status === 'fulfilled') this.saleProducts = result[8].value?.items || []
 			if (result[9].status === 'fulfilled') this.withdrawals = result[9].value?.items || []
+			if (result[10].status === 'fulfilled') this.platformKnowledge = result[10].value || null
+			if (result[11].status === 'fulfilled') this.platformDocuments = result[11].value || []
+			if (result[12].status === 'fulfilled') this.supportConversations = result[12].value?.items || []
 			this.loading = false
+		},
+		async loadSupport() {
+			const result = await supportApi.adminList({ status: this.supportFilter, page: 1, page_size: 100 })
+			this.supportConversations = result.items || []
+		},
+		async setSupportFilter(status) {
+			this.supportFilter = status
+			await this.loadSupport()
+		},
+		supportTitle(item) {
+			if (item.type === 'merchant') return `${item.merchant_name || '商家客服'} #${item.id}`
+			if (item.type === 'adoption') return `${item.adoption_pet_name || '领养沟通'} #${item.id}`
+			return `平台客服 #${item.id}`
+		},
+		openSupport(item) {
+			uni.navigateTo({ url: `/pages/support/platform?id=${item.id}&role=admin` })
+		},
+		async setSupportStatus(item, status) {
+			await supportApi.adminStatus(item.id, status)
+			uni.showToast({ title: status === 'resolved' ? '已标记处理' : '已标记未处理' })
+			this.loadSupport()
+		},
+		chooseFile(callback) {
+			const done = res => {
+				const path = res.tempFiles?.[0]?.path || res.tempFilePaths?.[0]
+				if (path) callback(path)
+			}
+			if (uni.chooseFile) uni.chooseFile({ count: 1, success: done })
+			else uni.chooseMessageFile({ count: 1, type: 'file', success: done })
+		},
+		choosePlatformKnowledgeDocument() {
+			this.chooseFile(async filePath => {
+				await adminApi.uploadPlatformKnowledgeDocument(filePath)
+				uni.showToast({ title: '平台知识文件已提交解析' })
+				this.loadAll()
+			})
+		},
+		choosePlatformKnowledgeReplacement(item) {
+			this.chooseFile(async filePath => {
+				await adminApi.replacePlatformKnowledgeDocument(item.id, filePath)
+				uni.showToast({ title: '平台知识文件已替换' })
+				this.loadAll()
+			})
+		},
+		async reindexPlatformKnowledge(item) {
+			await adminApi.reindexPlatformKnowledgeDocument(item.id)
+			uni.showToast({ title: '已提交重建索引' })
+			this.loadAll()
+		},
+		deletePlatformKnowledge(item) {
+			uni.showModal({
+				title: '删除平台知识文件',
+				content: `确定删除 ${item.file_name} 吗？`,
+				success: async result => {
+					if (!result.confirm) return
+					await adminApi.deletePlatformKnowledgeDocument(item.id)
+					uni.showToast({ title: '删除任务已提交' })
+					this.loadAll()
+				}
+			})
 		},
 		withdrawalStatus(status) {
 			return { pending: '待审核', approved: '已通过', rejected: '已驳回' }[status] || status
@@ -459,5 +583,5 @@ export default {
 </script>
 
 <style scoped lang="scss">
-.admin-shell{height:100vh;background:#f7f7f8}.admin-bar{display:flex;height:68px;align-items:center;justify-content:space-between;padding:0 25px;border-bottom:1px solid #e7e7e9;background:#fff}.brand,.sub{display:block}.brand{font-size:20px;font-weight:800}.sub{margin-top:3px;color:#888;font-size:10px}.admin-actions{display:flex;align-items:center;gap:12px;font-size:12px}.admin-layout{display:grid;height:calc(100vh - 68px);grid-template-columns:210px 1fr}.sidebar{padding:16px 10px;background:#24262c;color:#bbb}.sidebar view{display:flex;align-items:center;gap:10px;margin:3px 0;padding:12px 14px;border-radius:9px;font-size:12px}.sidebar view.active{background:var(--color-primary);color:#fff}.workspace{height:100%}.workspace-inner{padding:24px}.metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.metric{display:flex;flex-direction:column;gap:8px;padding:20px}.metric text:first-child{font-size:27px;font-weight:800}.metric text:last-child{color:var(--color-text-secondary);font-size:11px}.overview{margin-top:16px}.section-block{margin-top:16px}.section-block:first-of-type{margin-top:0}.section-title{display:block;margin-bottom:10px;font-size:13px;font-weight:800;color:var(--color-text-secondary)}@media(max-width:767px){.admin-bar{height:58px;padding:0 12px}.admin-layout{height:calc(100vh - 58px);grid-template-columns:64px 1fr}.sidebar{padding:8px 5px}.sidebar view{justify-content:center;padding:11px 5px;font-size:0}.sidebar view text{font-size:18px}.workspace-inner{padding:12px}.metric-grid{grid-template-columns:repeat(2,1fr)}}
+.admin-shell{height:100vh;background:#f7f7f8}.admin-bar{display:flex;height:68px;align-items:center;justify-content:space-between;padding:0 25px;border-bottom:1px solid #e7e7e9;background:#fff}.brand,.sub{display:block}.brand{font-size:20px;font-weight:800}.sub{margin-top:3px;color:#888;font-size:10px}.admin-actions{display:flex;align-items:center;gap:12px;font-size:12px}.admin-layout{display:grid;height:calc(100vh - 68px);grid-template-columns:210px 1fr}.sidebar{padding:16px 10px;background:#24262c;color:#bbb}.sidebar view{display:flex;align-items:center;gap:10px;margin:3px 0;padding:12px 14px;border-radius:9px;font-size:12px}.sidebar view.active{background:var(--color-primary);color:#fff}.workspace{height:100%}.workspace-inner{padding:24px}.metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.metric{display:flex;flex-direction:column;gap:8px;padding:20px}.metric text:first-child{font-size:27px;font-weight:800}.metric text:last-child{color:var(--color-text-secondary);font-size:11px}.overview{margin-top:16px}.section-block{margin-top:16px}.section-block:first-of-type{margin-top:0}.section-title{display:block;margin-bottom:10px;font-size:13px;font-weight:800;color:var(--color-text-secondary)}.panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.panel-heading .panel-title{margin-bottom:4px}.error-text{display:block;margin-top:5px;color:var(--color-danger);font-size:11px;line-height:1.5}.support-panel{padding:24px}.support-tabs{display:inline-flex;gap:4px;margin:2px 0 18px;padding:4px;border:1px solid var(--color-border);border-radius:10px;background:#fff8f1}.support-tab{min-width:76px;height:32px;padding:0 14px;border-radius:8px;color:var(--color-text-secondary);font-size:12px;font-weight:700;line-height:32px;text-align:center;cursor:pointer}.support-tab.active{background:#fff;color:var(--color-primary);box-shadow:0 4px 14px rgba(56,38,22,.08)}.support-list{display:grid;gap:10px}.support-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:18px;padding:16px 18px;border:1px solid var(--color-border);border-radius:12px;background:#fff}.support-main{min-width:0}.support-actions{display:flex;align-items:center;gap:10px}.support-actions .secondary-button{height:34px;padding:0 16px;border-radius:17px;font-size:12px;line-height:34px}.status-chip.resolved{background:#eaf8f0;color:var(--color-success)}@media(max-width:767px){.admin-bar{height:58px;padding:0 12px}.admin-layout{height:calc(100vh - 58px);grid-template-columns:64px 1fr}.sidebar{padding:8px 5px}.sidebar view{justify-content:center;padding:11px 5px;font-size:0}.sidebar view text{font-size:18px}.workspace-inner{padding:12px}.metric-grid{grid-template-columns:repeat(2,1fr)}.panel-heading{flex-direction:column}.support-panel{padding:16px}.support-tabs{display:flex;width:100%}.support-tab{flex:1}.support-row{grid-template-columns:1fr;align-items:flex-start;padding:14px}.support-actions{width:100%;flex-wrap:wrap}.support-actions .secondary-button{flex:1;min-width:120px}}
 </style>

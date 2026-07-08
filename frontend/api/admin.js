@@ -1,4 +1,4 @@
-import { request } from './request'
+import { request, upload } from './request'
 
 export const adminApi = {
 	users: () => request({ url: '/admin/users', auth: true }),
@@ -65,6 +65,38 @@ export const adminApi = {
 	orderTrend: params => request({
 		url: '/admin/statistics/orders-trend',
 		data: params,
+		auth: true
+	}),
+
+	platformKnowledge: () => request({
+		url: '/admin/knowledge/platform',
+		auth: true
+	}),
+	platformKnowledgeDocuments: () => request({
+		url: '/admin/knowledge/platform/documents',
+		auth: true
+	}),
+	uploadPlatformKnowledgeDocument: filePath => upload({
+		url: '/admin/knowledge/platform/documents',
+		filePath,
+		name: 'file',
+		auth: true
+	}),
+	replacePlatformKnowledgeDocument: (documentId, filePath) => upload({
+		url: `/admin/knowledge/platform/documents/${documentId}`,
+		filePath,
+		name: 'file',
+		auth: true,
+		method: 'PUT'
+	}),
+	reindexPlatformKnowledgeDocument: documentId => request({
+		url: `/admin/knowledge/platform/documents/${documentId}/reindex`,
+		method: 'POST',
+		auth: true
+	}),
+	deletePlatformKnowledgeDocument: documentId => request({
+		url: `/admin/knowledge/platform/documents/${documentId}`,
+		method: 'DELETE',
 		auth: true
 	}),
 

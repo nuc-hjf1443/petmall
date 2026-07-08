@@ -3,6 +3,7 @@ from models.product import (
     CartItem,
     Product,
     ProductCategory,
+    ProductFavorite,
     ProductImage,
     ProductReview,
     ProductSku,
@@ -11,7 +12,7 @@ from models.product import (
 from models.adoption import AdoptionApplication, AdoptionFollowUp, AdoptionPet
 from models.agent import AgentMessage, AgentRecommendation, AgentSession
 from models.audit import AdminActionLog, AuditLog, OperationLog
-from models.merchant import Merchant, MerchantQualification, MerchantStaff
+from models.merchant import Merchant, MerchantFollow, MerchantQualification, MerchantStaff
 from models.user import User, UserAddress, UserProfile
 from models.order import (
     AfterSale,
@@ -67,6 +68,12 @@ from models.coin import (
     PetCoinAccount,
     PetCoinLog,
 )
+from models.support import (
+    SupportConversation,
+    SupportConversationStatus,
+    SupportConversationType,
+    SupportMessage,
+)
 
 __all__ = [
     "AdminActionLog",
@@ -87,6 +94,7 @@ __all__ = [
     "KnowledgeDocument",
     "KnowledgeTask",
     "Merchant",
+    "MerchantFollow",
     "MerchantQualification",
     "MerchantStaff",
     "OperationLog",
@@ -111,6 +119,7 @@ __all__ = [
     "PostTopic",
     "Product",
     "ProductCategory",
+    "ProductFavorite",
     "ProductImage",
     "ProductReview",
     "ProductSku",
@@ -135,4 +144,8 @@ __all__ = [
     "User",
     "UserAddress",
     "UserProfile",
+    "SupportConversation",
+    "SupportConversationStatus",
+    "SupportConversationType",
+    "SupportMessage",
 ]

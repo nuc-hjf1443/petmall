@@ -88,11 +88,21 @@ class ProductSummaryResponse(BaseModel):
     applicable_pet_type: str | None = None
 
 
+class ProductMerchantSummary(BaseModel):
+    id: int
+    owner_user_id: int
+    shop_name: str
+    status: str
+
+
 class ProductDetailResponse(ProductSummaryResponse):
     status: str
     description: str | None = None
     skus: list[ProductSkuResponse]
     images: list[ProductImageResponse]
+    merchant: ProductMerchantSummary | None = None
+    favorited_by_me: bool = False
+    following_merchant: bool = False
     audit_reason: str | None = None
     submitted_at: datetime | None = None
     audited_at: datetime | None = None
@@ -105,6 +115,10 @@ class ProductListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ProductFavoriteListResponse(ProductListResponse):
+    pass
 
 
 class ProductReviewCreate(BaseModel):
