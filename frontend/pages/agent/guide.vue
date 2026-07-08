@@ -519,7 +519,8 @@ export default {
 	min-width: 280px;
 	max-width: 280px;
 	min-height: 0;
-	overflow: hidden;
+	overflow-y: auto;
+	overflow-x: hidden;
 	flex-direction: column;
 	padding: 20px;
 	border-right: 1px solid var(--color-border);
@@ -555,7 +556,11 @@ export default {
 	font-size: 20px;
 }
 .new-chat {
+	display: flex;
 	height: 38px;
+	min-height: 38px;
+	align-items: center;
+	justify-content: center;
 	margin: 20px 0 16px;
 	padding: 0;
 	border: 1px solid var(--color-primary);
@@ -563,7 +568,7 @@ export default {
 	background: #fff;
 	color: var(--color-primary);
 	font-size: 12px;
-	line-height: 38px;
+	line-height: 1;
 }
 .pet-picker-card {
 	width: 100%;
@@ -603,11 +608,10 @@ export default {
 .summary-card { flex: none; }
 .history-card {
 	display: flex;
-	min-height: 0;
-	flex: 1 1 auto;
+	flex: none;
 	flex-direction: column;
 	margin-top: 12px;
-	overflow: hidden;
+	overflow: visible;
 }
 .panel-heading {
 	display: flex;
@@ -714,8 +718,7 @@ export default {
 	line-height: 1.6;
 }
 .history-list {
-	min-height: 0;
-	overflow: auto;
+	overflow: visible;
 }
 .history-item {
 	display: grid;
