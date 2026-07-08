@@ -233,12 +233,40 @@ async def list_reports(db: AsyncSession, page: int, page_size: int) -> PageResul
     total = int((await db.scalar(select(func.count(Report.id)))) or 0)
     rows = (await db.execute(
         select(Report).order_by(Report.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    )).scalars()
+    )).scalars().all()
+    items = []
+    for report in rows:
+        target_user: User | None = None
+        target_content: str | None = None
+        source_area = "community_post" if report.target_type == "post" else "community_comment"
+        if report.target_type == "post":
+            post = await db.get(Post, report.target_id)
+            if post is not None:
+                target_user = await db.get(User, post.user_id)
+                target_content = post.content
+        elif report.target_type == "comment":
+            comment = await db.get(PostComment, report.target_id)
+            if comment is not None:
+                target_user = await db.get(User, comment.user_id)
+                target_content = comment.content
+        items.append({
+            "id": report.id,
+            "reporter_id": report.reporter_id,
+            "target_type": report.target_type,
+            "target_id": report.target_id,
+            "source_area": source_area,
+            "target_user_id": target_user.id if target_user else None,
+            "target_user_nickname": target_user.nickname if target_user else None,
+            "target_user_phone": target_user.phone if target_user else None,
+            "target_content": target_content,
+            "reason": report.reason,
+            "status": report.status,
+            "action": report.action,
+            "resolution_reason": report.resolution_reason,
+            "resolved_by": report.resolved_by,
+        })
     return PageResult(
-        items=[{
-            "id": r.id, "reporter_id": r.reporter_id, "target_type": r.target_type,
-            "target_id": r.target_id, "reason": r.reason, "status": r.status
-        } for r in rows],
+        items=items,
         total=total, page=page, page_size=page_size
     )
 
@@ -258,7 +286,7 @@ async def resolve_report(
     if report is None:
         raise not_found("Report not found")
     if report.status == "resolved":
-        return
+        raise conflict("Report already resolved")
     if action == "take_down" and report.target_type == "post":
         await take_down_post(db, report.target_id, reason, admin_id, commit=False)
     report.status = "resolved"

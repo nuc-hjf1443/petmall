@@ -69,7 +69,7 @@ export const communityApi = {
 		data,
 		auth: true
 	}),
-	topics: () => request({ url: '/topics' }),
+	topics: (options = {}) => request({ ...options, url: '/topics' }),
 	follow: userId => request({
 		url: `/users/${userId}/follow`,
 		method: 'POST',
