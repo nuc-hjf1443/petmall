@@ -146,17 +146,22 @@ async def list_products_by_merchant(
     db: AsyncSession,
     merchant_id: int,
     *,
+    status: str | None = None,
     offset: int = 0,
     limit: int = 100,
-) -> list[Product]:
+) -> tuple[list[Product], int]:
+    filters = [Product.merchant_id == merchant_id]
+    if status:
+        filters.append(Product.status == status)
+    total = int((await db.scalar(select(func.count(Product.id)).where(*filters))) or 0)
     result = await db.execute(
         select(Product)
-        .where(Product.merchant_id == merchant_id)
+        .where(*filters)
         .order_by(Product.updated_at.desc(), Product.id.desc())
         .offset(offset)
         .limit(limit)
     )
-    return list(result.scalars().all())
+    return list(result.scalars().all()), total
 
 
 async def list_products_by_status(

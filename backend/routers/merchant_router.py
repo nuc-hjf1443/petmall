@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import get_current_user, get_db, require_admin
@@ -10,6 +12,7 @@ from schemas.merchant_schema import (
     MerchantDashboardResponse,
     MerchantProductActionResponse,
     MerchantProductDiscountRequest,
+    MerchantProductListResponse,
     MerchantProductResponse,
     MerchantProductStatusRequest,
     MerchantResponse,
@@ -94,12 +97,24 @@ async def merchant_dashboard(
     return MerchantDashboardResponse(merchant_id=merchant.id, status=merchant.status)
 
 
-@router.get("/merchants/me/products")
+@router.get("/merchants/me/products", response_model=MerchantProductListResponse)
 async def merchant_products(
+    status: Annotated[
+        str | None,
+        Query(pattern="^(draft|pending|on_sale|off_shelf|rejected)$"),
+    ] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list:
-    return await list_merchant_products(db, current_user.id)
+) -> dict:
+    return await list_merchant_products(
+        db,
+        current_user.id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/merchants/me/products/{product_id}", response_model=MerchantProductResponse)
