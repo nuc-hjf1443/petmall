@@ -30,6 +30,7 @@ async def list_merchant_products(db: AsyncSession, user_id: int) -> list:
             "id": product.id,
             "merchant_id": product.merchant_id,
             "category_id": product.category_id,
+            "brand": product.brand,
             "title": product.title,
             "cover_image": product.cover_image,
             "price": product.price,

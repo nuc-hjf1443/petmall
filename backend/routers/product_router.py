@@ -38,6 +38,7 @@ async def list_products(
     pet_type: Annotated[str | None, Query(max_length=64)] = None,
     min_price: Annotated[int | None, Query(ge=0)] = None,
     max_price: Annotated[int | None, Query(ge=0)] = None,
+    sort: Annotated[str, Query(pattern="^(sales|newest|price_asc|price_desc)$")] = "sales",
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     db: AsyncSession = Depends(get_db),
@@ -52,6 +53,7 @@ async def list_products(
         max_price=max_price,
         page=page,
         page_size=page_size,
+        sort=sort,
     )
 
 

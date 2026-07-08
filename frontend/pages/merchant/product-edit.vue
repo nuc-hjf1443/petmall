@@ -63,10 +63,46 @@
 						</view>
 						<text v-if="categoryId" class="category-path">{{ categoryName }}</text>
 					</view>
-					<label class="form-field">
+					<view class="form-field">
 						<text>适用宠物</text>
-						<input v-model.trim="form.applicable_pet_type" maxlength="64" placeholder="例如：猫、犬、猫犬通用" />
-					</label>
+						<view class="choice-row">
+							<view
+								v-for="item in petTypeOptions"
+								:key="item"
+								class="choice-chip"
+								:class="{ active: selectedPetTypeOption === item }"
+								@click="selectPetTypeOption(item)"
+							>
+								{{ item }}
+							</view>
+						</view>
+						<input
+							v-if="selectedPetTypeOption === '其他'"
+							v-model.trim="form.applicable_pet_type"
+							maxlength="64"
+							placeholder="请输入其他宠物类别"
+						/>
+					</view>
+					<view class="form-field">
+						<text>品牌</text>
+						<view class="choice-row">
+							<view
+								v-for="item in brandOptions"
+								:key="item"
+								class="choice-chip"
+								:class="{ active: selectedBrandOption === item }"
+								@click="selectBrandOption(item)"
+							>
+								{{ item }}
+							</view>
+						</view>
+						<input
+							v-if="selectedBrandOption === '其他'"
+							v-model.trim="form.brand"
+							maxlength="100"
+							placeholder="请输入其他品牌"
+						/>
+					</view>
 					<label class="form-field full">
 						<text>商品标题 <text class="required">*</text></text>
 						<input v-model.trim="form.title" maxlength="255" placeholder="请输入清晰、简洁的商品标题" />
@@ -179,8 +215,13 @@ export default {
 			form: {
 				title: '',
 				description: '',
+				brand: '',
 				applicable_pet_type: ''
 			},
+			selectedPetTypeOption: '',
+			selectedBrandOption: '',
+			petTypeOptions: ['猫', '狗', '猫犬通用', '小宠', '水族', '其他'],
+			brandOptions: ['皇家', '伯纳天纯', '麦富迪', '网易严选', 'pidan', '卫仕', '其他'],
 			sku: {
 				sku_code: '',
 				name: '',
@@ -268,6 +309,14 @@ export default {
 			this.categoryId = item.id
 			this.closeCategoryDropdowns()
 		},
+		selectPetTypeOption(item) {
+			this.selectedPetTypeOption = item
+			this.form.applicable_pet_type = item === '其他' ? '' : item
+		},
+		selectBrandOption(item) {
+			this.selectedBrandOption = item
+			this.form.brand = item === '其他' ? '' : item
+		},
 		back() {
 			uni.navigateBack()
 		},
@@ -312,11 +361,16 @@ export default {
 
 			this.saving = true
 			try {
+				const payloadForm = {
+					...this.form,
+					brand: this.form.brand || null,
+					applicable_pet_type: this.form.applicable_pet_type || null
+				}
 				if (this.id) {
-					await merchantApi.updateProduct(this.id, this.form)
+					await merchantApi.updateProduct(this.id, payloadForm)
 				} else {
 					await merchantApi.createProduct({
-						...this.form,
+						...payloadForm,
 						category_id: this.categoryId,
 						skus: [{ ...this.sku, price, stock: Number(this.sku.stock) }],
 						images: [{ image_url: this.imageUrl, is_primary: true, sort_order: 0 }]
@@ -335,6 +389,6 @@ export default {
 </script>
 
 <style scoped>
-.product-edit-page{max-width:1120px}.page-heading{align-items:center}.form-section{margin-bottom:16px;padding:24px}.section-heading{display:flex;align-items:center;gap:12px;margin-bottom:22px;padding-bottom:17px;border-bottom:1px solid var(--color-border)}.section-index{display:flex;width:32px;height:32px;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;background:var(--color-primary-soft);color:var(--color-primary);font-size:14px;font-weight:800}.section-name,.section-description{display:block}.section-name{font-size:17px;font-weight:800}.section-description{margin-top:4px;color:var(--color-text-secondary);font-size:11px}.required{color:var(--color-danger)}.category-field{position:relative;z-index:3}.category-cascader{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.category-select{position:relative;min-width:0}.select-control{display:flex;width:100%;min-height:42px;align-items:center;justify-content:space-between;padding:10px 13px;border:1px solid var(--color-border);border-radius:11px;background:#fff;color:var(--color-text);font-size:14px;cursor:pointer;transition:.2s}.select-control.open{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-soft)}.select-control.disabled{cursor:not-allowed;background:#faf8f5;color:#aaa}.select-control .placeholder{color:#999}.select-arrow{color:var(--color-text-secondary);font-size:18px;transition:.2s}.select-control.open .select-arrow{transform:rotate(180deg)}.category-options{position:absolute;top:48px;right:0;left:0;z-index:10;max-height:260px;overflow:auto;padding:6px;border:1px solid var(--color-border);border-radius:12px;background:#fff;box-shadow:0 14px 34px rgba(56,38,22,.16)}.category-option,.category-empty{display:flex;min-height:40px;align-items:center;justify-content:space-between;padding:8px 11px;border-radius:8px;color:var(--color-text);font-size:13px}.category-option{cursor:pointer}.category-option:hover,.category-option.active{background:var(--color-primary-soft);color:var(--color-primary)}.category-empty{color:var(--color-text-secondary)}.category-path{display:block;margin-top:8px;color:var(--color-text-secondary);font-size:11px}.form-field input,.form-field textarea{transition:border-color .2s,box-shadow .2s}.form-field input:focus,.form-field textarea:focus{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-soft);outline:none}.form-field textarea{min-height:120px}.field-hint{align-self:flex-end;margin-top:-2px;color:#aaa;font-size:10px}.input-with-suffix{display:flex;align-items:center;border:1px solid var(--color-border);border-radius:11px;background:#fff;transition:.2s}.input-with-suffix:focus-within{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-soft)}.input-with-suffix input{min-width:0;flex:1;border:0;box-shadow:none}.input-with-suffix input:focus{border:0;box-shadow:none}.input-with-suffix>text{padding-right:13px;color:var(--color-text-secondary);font-size:12px}.upload-field{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.upload-field>text:first-child{font-size:13px;color:var(--color-text-secondary)}.upload-box{display:flex;width:180px;height:135px;align-items:center;justify-content:center;overflow:hidden;border:1px dashed var(--color-primary);border-radius:12px;background:#fffaf6;cursor:pointer}.upload-box image{width:100%;height:100%}.upload-placeholder{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--color-primary);font-size:12px}.upload-plus{font-size:28px;line-height:1}.upload-actions{display:flex;gap:10px}.image-preview{position:relative;width:180px;height:135px;margin-top:14px;overflow:hidden;border:1px solid var(--color-border);border-radius:12px;background:#f7f3ef}.image-preview image{width:100%;height:100%}.image-preview>text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:15px;background:#f7f3ef;color:var(--color-danger);font-size:11px;text-align:center}.submit-bar{position:sticky;bottom:16px;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 18px;border:1px solid var(--color-border);border-radius:16px;background:rgba(255,255,255,.94);box-shadow:0 10px 32px rgba(56,38,22,.12);backdrop-filter:blur(10px)}.submit-bar>text{color:var(--color-text-secondary);font-size:11px}.submit-actions{display:flex;gap:10px}.save-button{min-width:120px}.action-button[disabled]{opacity:.65}
+.product-edit-page{max-width:1120px}.page-heading{align-items:center}.form-section{margin-bottom:16px;padding:24px}.section-heading{display:flex;align-items:center;gap:12px;margin-bottom:22px;padding-bottom:17px;border-bottom:1px solid var(--color-border)}.section-index{display:flex;width:32px;height:32px;align-items:center;justify-content:center;flex-shrink:0;border-radius:50%;background:var(--color-primary-soft);color:var(--color-primary);font-size:14px;font-weight:800}.section-name,.section-description{display:block}.section-name{font-size:17px;font-weight:800}.section-description{margin-top:4px;color:var(--color-text-secondary);font-size:11px}.required{color:var(--color-danger)}.category-field{position:relative;z-index:3}.category-cascader{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.category-select{position:relative;min-width:0}.select-control{display:flex;width:100%;min-height:42px;align-items:center;justify-content:space-between;padding:10px 13px;border:1px solid var(--color-border);border-radius:11px;background:#fff;color:var(--color-text);font-size:14px;cursor:pointer;transition:.2s}.select-control.open{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-soft)}.select-control.disabled{cursor:not-allowed;background:#faf8f5;color:#aaa}.select-control .placeholder{color:#999}.select-arrow{color:var(--color-text-secondary);font-size:18px;transition:.2s}.select-control.open .select-arrow{transform:rotate(180deg)}.category-options{position:absolute;top:48px;right:0;left:0;z-index:10;max-height:260px;overflow:auto;padding:6px;border:1px solid var(--color-border);border-radius:12px;background:#fff;box-shadow:0 14px 34px rgba(56,38,22,.16)}.category-option,.category-empty{display:flex;min-height:40px;align-items:center;justify-content:space-between;padding:8px 11px;border-radius:8px;color:var(--color-text);font-size:13px}.category-option{cursor:pointer}.category-option:hover,.category-option.active{background:var(--color-primary-soft);color:var(--color-primary)}.category-empty{color:var(--color-text-secondary)}.category-path{display:block;margin-top:8px;color:var(--color-text-secondary);font-size:11px}.choice-row{display:flex;flex-wrap:wrap;gap:8px}.choice-chip{min-height:34px;padding:7px 13px;border:1px solid var(--color-border);border-radius:8px;background:#fff;color:var(--color-text-secondary);font-size:12px;line-height:18px;cursor:pointer}.choice-chip.active{border-color:var(--color-primary);background:var(--color-primary-soft);color:var(--color-primary);font-weight:800}.form-field input,.form-field textarea{transition:border-color .2s,box-shadow .2s}.form-field input:focus,.form-field textarea:focus{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-soft);outline:none}.form-field textarea{min-height:120px}.field-hint{align-self:flex-end;margin-top:-2px;color:#aaa;font-size:10px}.input-with-suffix{display:flex;align-items:center;border:1px solid var(--color-border);border-radius:11px;background:#fff;transition:.2s}.input-with-suffix:focus-within{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-soft)}.input-with-suffix input{min-width:0;flex:1;border:0;box-shadow:none}.input-with-suffix input:focus{border:0;box-shadow:none}.input-with-suffix>text{padding-right:13px;color:var(--color-text-secondary);font-size:12px}.upload-field{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.upload-field>text:first-child{font-size:13px;color:var(--color-text-secondary)}.upload-box{display:flex;width:180px;height:135px;align-items:center;justify-content:center;overflow:hidden;border:1px dashed var(--color-primary);border-radius:12px;background:#fffaf6;cursor:pointer}.upload-box image{width:100%;height:100%}.upload-placeholder{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--color-primary);font-size:12px}.upload-plus{font-size:28px;line-height:1}.upload-actions{display:flex;gap:10px}.image-preview{position:relative;width:180px;height:135px;margin-top:14px;overflow:hidden;border:1px solid var(--color-border);border-radius:12px;background:#f7f3ef}.image-preview image{width:100%;height:100%}.image-preview>text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:15px;background:#f7f3ef;color:var(--color-danger);font-size:11px;text-align:center}.submit-bar{position:sticky;bottom:16px;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 18px;border:1px solid var(--color-border);border-radius:16px;background:rgba(255,255,255,.94);box-shadow:0 10px 32px rgba(56,38,22,.12);backdrop-filter:blur(10px)}.submit-bar>text{color:var(--color-text-secondary);font-size:11px}.submit-actions{display:flex;gap:10px}.save-button{min-width:120px}.action-button[disabled]{opacity:.65}
 @media(max-width:767px){.form-section{padding:17px}.page-heading{align-items:flex-start}.page-heading>.secondary-button{height:34px;padding:0 13px;line-height:34px}.category-cascader{grid-template-columns:1fr}.submit-bar{bottom:74px;padding:11px 12px}.submit-bar>text{display:none}.submit-actions{width:100%}.submit-actions button{flex:1}.image-preview{width:140px;height:105px}}
 </style>

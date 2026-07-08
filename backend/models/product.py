@@ -70,6 +70,7 @@ class Product(Base, TimestampMixin):
         ForeignKey("product_category.id"),
         nullable=False,
     )
+    brand: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
     title: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     cover_image: Mapped[str | None] = mapped_column(String(512), nullable=True)
     price: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
