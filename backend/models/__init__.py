@@ -117,7 +117,6 @@ __all__ = [
     "ProductStatus",
     "Report",
     "RagRetrievalLog",
-    "DocumentStatus",
     "PetProfile",
     "PetGrowthRecord",
     "PetHealthReminder",

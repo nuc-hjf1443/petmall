@@ -1,7 +1,7 @@
 """add guide recommendation metadata
 
-Revision ID: 0010_guide_recommendation_metadata
-Revises: 0009_wallet_recharge_withdrawal
+Revision ID: 0011_guide_recommendation_metadata
+Revises: 0010_product_brand
 """
 from typing import Sequence
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0010_guide_recommendation_metadata"
-down_revision: str | None = "0009_wallet_recharge_withdrawal"
+revision: str = "0011_guide_recommendation_metadata"
+down_revision: str | None = "0010_product_brand"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import get_current_user, get_db
@@ -18,22 +18,21 @@ from schemas.agent_schema import (
     QaMessageCreate,
     QaSessionCreate,
 )
-from services.guide_agent_service import create_guide_session, send_guide_message
+from services.guide_agent_service import (
+    create_guide_session,
+    list_latest_guide_recommendations,
+    send_guide_message,
+)
 from services.qa_agent_service import (
     complete_qa_message,
     create_qa_session,
     delete_qa_session,
     get_user_session,
     list_qa_sessions,
+    list_user_sessions,
     queue_qa_message,
     send_qa_message,
 )
-from services.guide_agent_service import (
-    create_guide_session,
-    list_latest_guide_recommendations,
-    send_guide_message,
-)
-from services.qa_agent_service import create_qa_session, get_user_session, list_user_sessions, send_qa_message
 
 
 router = APIRouter(prefix="/agents", tags=["agents"])

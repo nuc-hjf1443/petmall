@@ -56,20 +56,10 @@ class AgentSessionListItem(BaseModel):
     pet_id: int | None = None
     last_message: str | None = None
     last_role: str | None = None
-    message_count: int = 0
     is_pending: bool = False
-    created_at: datetime
-    updated_at: datetime
-
-
-class AgentSessionListItem(BaseModel):
-    id: int
-    agent_type: str
-    title: str | None = None
-    pet_id: int | None = None
     latest_message_content: str | None = None
     latest_message_at: datetime | None = None
-    message_count: int
+    message_count: int = 0
     created_at: datetime
     updated_at: datetime
 
