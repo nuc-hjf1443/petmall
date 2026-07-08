@@ -72,7 +72,7 @@
 							:key="item.key"
 							class="sidebar-item"
 							:class="{ active: activeTab === item.key }"
-							@click="activeTab = item.key"
+							@click="setActiveTab(item.key)"
 						>
 							<text>{{ item.icon }}</text>
 							<text>{{ item.label }}</text>
@@ -179,7 +179,7 @@
 									:key="item.key"
 									class="tab"
 									:class="{ active: productFilter === item.key }"
-									@click="productFilter = item.key"
+									@click="setProductFilter(item.key)"
 								>
 									{{ item.label }}
 								</view>
@@ -192,7 +192,8 @@
 									<text>审核备注</text>
 									<text>操作</text>
 								</view>
-								<view v-if="!filteredProducts.length" class="empty-inline">暂无商品，先发布第一件商品。</view>
+								<view v-if="productLoading && !filteredProducts.length" class="empty-inline">正在加载商品...</view>
+								<view v-else-if="!filteredProducts.length" class="empty-inline">暂无商品，先发布第一件商品。</view>
 								<view v-for="item in filteredProducts" :key="item.id" class="table-row product-row">
 									<text class="strong">{{ item.title }}</text>
 									<text>{{ item.stock || 0 }}</text>
@@ -206,6 +207,12 @@
 										<button v-if="['on_sale','off_shelf'].includes(item.status)" class="secondary-button mini" @click="discount(item.id)">改价</button>
 									</view>
 								</view>
+							</view>
+							<view v-if="filteredProducts.length" class="load-more">
+								<button v-if="hasMoreProducts" class="secondary-button compact" :loading="productLoadingMore" :disabled="productLoadingMore" @click="loadMoreProducts">
+									{{ productLoadingMore ? '加载中...' : '加载更多' }}
+								</button>
+								<text v-else>已加载全部 {{ productTotal }} 个商品</text>
 							</view>
 						</view>
 					</view>
@@ -308,6 +315,11 @@ export default {
 			merchant: null,
 			dashboard: null,
 			products: [],
+			productPage: 1,
+			productPageSize: 20,
+			productTotal: 0,
+			productLoading: false,
+			productLoadingMore: false,
 			supportConversations: [],
 			loading: true,
 			saving: false,
@@ -406,8 +418,10 @@ export default {
 			return (this.merchant?.shop_name || '商').slice(0, 1)
 		},
 		filteredProducts() {
-			if (this.productFilter === 'all') return this.products
-			return this.products.filter(item => item.status === this.productFilter)
+			return this.products
+		},
+		hasMoreProducts() {
+			return this.products.length < this.productTotal
 		},
 		auditProducts() {
 			return this.products.filter(item => ['draft', 'pending', 'rejected', 'off_shelf'].includes(item.status))
@@ -432,11 +446,16 @@ export default {
 	onShow() {
 		this.load()
 	},
+	onReachBottom() {
+		if (this.activeTab === 'products') this.loadMoreProducts()
+	},
 	methods: {
 		async load() {
 			this.loading = true
 			this.dashboard = null
 			this.products = []
+			this.productPage = 1
+			this.productTotal = 0
 			this.supportConversations = []
 			try {
 				this.merchant = await merchantApi.me()
@@ -448,14 +467,56 @@ export default {
 			if (this.merchant?.status === 'approved') {
 				const result = await Promise.allSettled([
 					merchantApi.dashboard(),
-					merchantApi.products(),
+					merchantApi.products(this.productQueryParams(1)),
 					supportApi.merchantList({ status: this.supportFilter, page: 1, page_size: 100 })
 				])
 				if (result[0].status === 'fulfilled') this.dashboard = result[0].value
-				if (result[1].status === 'fulfilled') this.products = result[1].value || []
+				if (result[1].status === 'fulfilled') this.applyProductPage(result[1].value, true)
 				if (result[2].status === 'fulfilled') this.supportConversations = result[2].value?.items || []
 			}
 			this.loading = false
+		},
+		setActiveTab(tab) {
+			this.activeTab = tab
+			if (tab === 'products' && !this.products.length && !this.productLoading) {
+				this.loadProducts(true)
+			}
+		},
+		async setProductFilter(filter) {
+			if (this.productFilter === filter) return
+			this.productFilter = filter
+			await this.loadProducts(true)
+		},
+		productQueryParams(page) {
+			return {
+				page,
+				page_size: this.productPageSize,
+				status: this.productFilter === 'all' ? undefined : this.productFilter
+			}
+		},
+		applyProductPage(result, reset = false) {
+			const items = result?.items || []
+			this.products = reset ? items : this.products.concat(items)
+			this.productPage = result?.page || (reset ? 1 : this.productPage)
+			this.productTotal = result?.total || 0
+		},
+		async loadProducts(reset = false) {
+			if (!this.merchant || this.merchant.status !== 'approved') return
+			if (this.productLoading || this.productLoadingMore) return
+			const nextPage = reset ? 1 : this.productPage + 1
+			if (!reset && !this.hasMoreProducts) return
+			if (reset) this.productLoading = true
+			else this.productLoadingMore = true
+			try {
+				const result = await merchantApi.products(this.productQueryParams(nextPage))
+				this.applyProductPage(result, reset)
+			} finally {
+				this.productLoading = false
+				this.productLoadingMore = false
+			}
+		},
+		loadMoreProducts() {
+			return this.loadProducts(false)
 		},
 		async loadSupport() {
 			const result = await supportApi.merchantList({ status: this.supportFilter, page: 1, page_size: 100 })
@@ -538,21 +599,21 @@ export default {
 			try {
 				await merchantApi.submitProduct(id, {})
 				uni.showToast({ title: '商品已提交审核' })
-				this.load()
+				this.loadProducts(true)
 			} catch (error) {}
 		},
 		async onSale(id) {
 			try {
 				await merchantApi.putProductOnSale(id, {})
 				uni.showToast({ title: '商品已上架' })
-				this.load()
+				this.loadProducts(true)
 			} catch (error) {}
 		},
 		async offSale(id) {
 			try {
 				await merchantApi.takeProductOffSale(id, {})
 				uni.showToast({ title: '商品已下架' })
-				this.load()
+				this.loadProducts(true)
 			} catch (error) {}
 		},
 		discount(id) {
@@ -565,7 +626,7 @@ export default {
 					try {
 						await merchantApi.setProductDiscount(id, { sku_prices: JSON.parse(result.content) })
 						uni.showToast({ title: '价格已更新' })
-						this.load()
+						this.loadProducts(true)
 					} catch (error) {
 						if (error instanceof SyntaxError) {
 							uni.showToast({ title: 'JSON 格式错误', icon: 'none' })
@@ -805,6 +866,13 @@ export default {
 .status-badge.rejected { background: #fff0f0; color: var(--color-danger); }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mini { min-width: 54px; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 11px; line-height: 28px; }
+.load-more {
+	display: flex;
+	justify-content: center;
+	padding: 16px 0 2px;
+	color: var(--color-text-secondary);
+	font-size: 12px;
+}
 .empty-inline, .empty-state {
 	padding: 28px;
 	color: var(--color-text-secondary);

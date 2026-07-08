@@ -436,14 +436,18 @@ async def get_products_for_merchant(
     db: AsyncSession,
     merchant_id: int,
     *,
-    offset: int = 0,
-    limit: int = 100,
-) -> list[Product]:
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Product], int]:
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
     return await list_products_by_merchant(
         db,
         merchant_id,
-        offset=offset,
-        limit=limit,
+        status=status,
+        offset=(safe_page - 1) * safe_page_size,
+        limit=safe_page_size,
     )
 
 

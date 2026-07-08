@@ -162,7 +162,7 @@ async def test_merchant_apply_and_admin_approve_sets_user_merchant(test_context,
 
     products = await client.get("/merchants/me/products", headers=auth_headers(merchant_token))
     assert products.status_code == 200
-    assert products.json() == []
+    assert products.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
 
     async with session_factory() as session:
         category = ProductCategory(name="Merchant Food", sort_order=1)
@@ -197,6 +197,39 @@ async def test_merchant_apply_and_admin_approve_sets_user_merchant(test_context,
     product_id = product["id"]
     sku_id = product["skus"][0]["id"]
     assert product["status"] == ProductStatus.DRAFT.value
+
+    async with session_factory() as session:
+        session.add(
+            Product(
+                merchant_id=merchant_id,
+                category_id=category_id,
+                title="Sang Dog Toy",
+                price=500,
+                stock=2,
+                status=ProductStatus.ON_SALE.value,
+            )
+        )
+        await session.commit()
+
+    product_page = await client.get(
+        "/merchants/me/products",
+        headers=auth_headers(merchant_token),
+        params={"page": 1, "page_size": 1},
+    )
+    assert product_page.status_code == 200, product_page.text
+    assert product_page.json()["total"] == 2
+    assert len(product_page.json()["items"]) == 1
+    assert product_page.json()["page"] == 1
+    assert product_page.json()["page_size"] == 1
+
+    sale_page = await client.get(
+        "/merchants/me/products",
+        headers=auth_headers(merchant_token),
+        params={"status": ProductStatus.ON_SALE.value, "page": 1, "page_size": 20},
+    )
+    assert sale_page.status_code == 200, sale_page.text
+    assert sale_page.json()["total"] == 1
+    assert sale_page.json()["items"][0]["status"] == ProductStatus.ON_SALE.value
 
     submitted = await client.post(
         f"/merchants/me/products/{product_id}/submit",

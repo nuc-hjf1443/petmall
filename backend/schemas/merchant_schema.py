@@ -96,3 +96,10 @@ class MerchantProductActionResponse(BaseModel):
 
 class MerchantProductResponse(BaseModel):
     product: dict[str, Any]
+
+
+class MerchantProductListResponse(BaseModel):
+    items: list[dict[str, Any]]
+    total: int
+    page: int
+    page_size: int

@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.merchant import Merchant
+from models.product import ProductStatus
 from schemas.merchant_schema import MerchantProductDiscountRequest, MerchantProductStatusRequest
 from schemas.product_schema import ProductCreate, ProductUpdate
 from services.merchant_service import get_my_merchant
@@ -23,29 +24,51 @@ async def get_active_merchant_for_user(db: AsyncSession, user_id: int) -> Mercha
     return merchant
 
 
-async def list_merchant_products(db: AsyncSession, user_id: int) -> list:
+async def list_merchant_products(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
     merchant = await get_active_merchant_for_user(db, user_id)
-    products = await get_products_for_merchant(db, merchant.id)
-    return [
-        {
-            "id": product.id,
-            "merchant_id": product.merchant_id,
-            "category_id": product.category_id,
-            "brand": product.brand,
-            "title": product.title,
-            "cover_image": product.cover_image,
-            "price": product.price,
-            "original_price": product.original_price,
-            "stock": product.stock,
-            "status": product.status,
-            "audit_reason": product.audit_reason,
-            "submitted_at": product.submitted_at,
-            "audited_at": product.audited_at,
-            "created_at": product.created_at,
-            "updated_at": product.updated_at,
-        }
-        for product in products
-    ]
+    if status is not None and status not in {item.value for item in ProductStatus}:
+        raise bad_request("Invalid product status")
+    products, total = await get_products_for_merchant(
+        db,
+        merchant.id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    return {
+        "items": [
+            {
+                "id": product.id,
+                "merchant_id": product.merchant_id,
+                "category_id": product.category_id,
+                "brand": product.brand,
+                "title": product.title,
+                "cover_image": product.cover_image,
+                "price": product.price,
+                "original_price": product.original_price,
+                "stock": product.stock,
+                "status": product.status,
+                "audit_reason": product.audit_reason,
+                "submitted_at": product.submitted_at,
+                "audited_at": product.audited_at,
+                "created_at": product.created_at,
+                "updated_at": product.updated_at,
+            }
+            for product in products
+        ],
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_page_size,
+    }
 
 
 async def get_merchant_product(db: AsyncSession, user_id: int, product_id: int) -> dict:

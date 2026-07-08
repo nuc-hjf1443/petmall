@@ -29,7 +29,7 @@ export const merchantApi = {
 		auth: true
 	}),
 	dashboard: () => request({ url: '/merchants/me/dashboard', auth: true }),
-	products: () => request({ url: '/merchants/me/products', auth: true }),
+	products: params => request({ url: '/merchants/me/products', data: params, auth: true }),
 	product: productId => request({
 		url: `/merchants/me/products/${productId}`,
 		auth: true
