@@ -1,4 +1,4 @@
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -9,6 +9,7 @@ from models.product import (
     ProductSku,
     ProductStatus,
 )
+from models.order import Order, OrderItem, OrderStatus
 
 
 async def list_enabled_categories(db: AsyncSession) -> list[ProductCategory]:
@@ -31,6 +32,7 @@ async def list_public_products(
     max_price: int | None,
     page: int,
     page_size: int,
+    sort: str,
 ) -> tuple[list[Product], int]:
     filters = [
         Product.status == ProductStatus.ON_SALE.value,
@@ -41,7 +43,13 @@ async def list_public_products(
         filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
     if brand_keyword:
         pattern = f"%{brand_keyword.strip()}%"
-        filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
+        filters.append(
+            or_(
+                Product.brand.ilike(pattern),
+                Product.title.ilike(pattern),
+                Product.description.ilike(pattern),
+            )
+        )
     if category_ids is not None:
         filters.append(Product.category_id.in_(category_ids))
     if pet_type:
@@ -56,11 +64,36 @@ async def list_public_products(
         .join(ProductCategory, ProductCategory.id == Product.category_id)
         .where(*filters)
     )
+    sales_statuses = [
+        OrderStatus.PAID.value,
+        OrderStatus.PENDING_SHIPMENT.value,
+        OrderStatus.SHIPPED.value,
+        OrderStatus.PENDING_RECEIPT.value,
+        OrderStatus.COMPLETED.value,
+    ]
+    sales_subquery = (
+        select(
+            OrderItem.product_id.label("product_id"),
+            func.coalesce(func.sum(OrderItem.quantity), 0).label("sales_count"),
+        )
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(Order.status.in_(sales_statuses))
+        .group_by(OrderItem.product_id)
+        .subquery()
+    )
+    order_by = {
+        "newest": [Product.created_at.desc(), Product.id.desc()],
+        "price_asc": [Product.price.asc(), Product.id.desc()],
+        "price_desc": [Product.price.desc(), Product.id.desc()],
+        "sales": [desc(func.coalesce(sales_subquery.c.sales_count, 0)), Product.updated_at.desc(), Product.id.desc()],
+    }.get(sort, [Product.updated_at.desc(), Product.id.desc()])
+
     result = await db.execute(
         select(Product)
         .join(ProductCategory, ProductCategory.id == Product.category_id)
+        .outerjoin(sales_subquery, sales_subquery.c.product_id == Product.id)
         .where(*filters)
-        .order_by(Product.updated_at.desc(), Product.id.desc())
+        .order_by(*order_by)
         .offset((page - 1) * page_size)
         .limit(page_size)
     )

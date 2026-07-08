@@ -4,6 +4,7 @@ import pytest
 from core.auth import hash_password
 from core.errors import AppException
 from main import app
+from models.order import Order, OrderItem
 from models.product import Product, ProductCategory, ProductSku, ProductStatus
 from models.user import User
 from schemas.product_schema import (
@@ -48,6 +49,7 @@ async def seed_catalog(session_factory) -> dict[str, int]:
             original_price=1599,
             stock=5,
             status=ProductStatus.ON_SALE.value,
+            brand="Royal",
             description="Chicken recipe for adult cats",
             applicable_pet_type="cat",
         )
@@ -58,6 +60,7 @@ async def seed_catalog(session_factory) -> dict[str, int]:
             price=599,
             stock=10,
             status=ProductStatus.ON_SALE.value,
+            brand="Pidan",
             applicable_pet_type="dog",
         )
         hidden_product = Product(
@@ -67,6 +70,7 @@ async def seed_catalog(session_factory) -> dict[str, int]:
             price=999,
             stock=20,
             status=ProductStatus.DRAFT.value,
+            brand="Royal",
             applicable_pet_type="cat",
         )
         session.add_all([cat_product, dog_product, hidden_product])
@@ -149,6 +153,19 @@ async def test_category_product_filter_and_detail_visibility(test_context):
     body = products.json()
     assert body["total"] == 1
     assert body["items"][0]["id"] == ids["cat_product_id"]
+    assert body["items"][0]["brand"] == "Royal"
+
+    brand_products = await client.get("/products", params={"brand_keyword": "Pidan"})
+    assert brand_products.status_code == 200
+    assert brand_products.json()["total"] == 1
+    assert brand_products.json()["items"][0]["title"] == "Dog Ball"
+
+    price_asc = await client.get("/products", params={"sort": "price_asc"})
+    assert price_asc.status_code == 200
+    assert [item["title"] for item in price_asc.json()["items"]] == [
+        "Dog Ball",
+        "Premium Cat Food",
+    ]
 
     detail = await client.get(f"/products/{ids['cat_product_id']}")
     assert detail.status_code == 200
@@ -156,6 +173,61 @@ async def test_category_product_filter_and_detail_visibility(test_context):
 
     hidden = await client.get(f"/products/{ids['hidden_product_id']}")
     assert hidden.status_code == 404
+
+
+async def test_product_sales_newest_and_price_sort(test_context):
+    client: AsyncClient = test_context["client"]
+    ids = await seed_catalog(test_context["session_factory"])
+
+    async with test_context["session_factory"]() as session:
+        order = Order(
+            order_no="PMSORT001",
+            user_id=1,
+            merchant_id=1001,
+            total_amount=1198,
+            discount_amount=0,
+            coin_deduct_amount=0,
+            pay_amount=1198,
+            status="paid",
+            address_snapshot={
+                "receiver_name": "Tester",
+                "receiver_phone": "13800138000",
+                "province": "Shanghai",
+                "city": "Shanghai",
+                "district": "Pudong",
+                "detail_address": "No.1 Road",
+            },
+        )
+        order.items.append(
+            OrderItem(
+                product_id=ids["cat_product_id"],
+                sku_id=ids["cat_sku_id"],
+                product_title="Premium Cat Food",
+                sku_name="1 kg",
+                sku_specs={"weight": "1kg"},
+                product_image="/cat-food.png",
+                unit_price=1299,
+                quantity=2,
+                subtotal=2598,
+            )
+        )
+        session.add(order)
+        await session.commit()
+
+    sales = await client.get("/products", params={"sort": "sales"})
+    assert sales.status_code == 200
+    assert sales.json()["items"][0]["id"] == ids["cat_product_id"]
+
+    price_desc = await client.get("/products", params={"sort": "price_desc"})
+    assert price_desc.status_code == 200
+    assert [item["title"] for item in price_desc.json()["items"]] == [
+        "Premium Cat Food",
+        "Dog Ball",
+    ]
+
+    newest = await client.get("/products", params={"sort": "newest"})
+    assert newest.status_code == 200
+    assert newest.json()["total"] == 2
 
 
 async def test_cart_crud_stock_and_owner_isolation(test_context, strong_password):
@@ -252,6 +324,7 @@ async def test_merchant_product_inventory_images_and_audit(test_context):
             ProductCreate(
                 category_id=category_id,
                 title="Pet Vitamins",
+                brand="VetPlus",
                 description="Daily supplement",
                 applicable_pet_type="dog",
                 skus=[

@@ -51,6 +51,7 @@ class ProductSkuUpsert(BaseModel):
 
 class ProductCreate(BaseModel):
     category_id: int = Field(..., gt=0)
+    brand: str | None = Field(default=None, max_length=100)
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     applicable_pet_type: str | None = Field(default=None, max_length=64)
@@ -60,6 +61,7 @@ class ProductCreate(BaseModel):
 
 class ProductUpdate(BaseModel):
     category_id: int | None = Field(default=None, gt=0)
+    brand: str | None = Field(default=None, max_length=100)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     applicable_pet_type: str | None = Field(default=None, max_length=64)
@@ -77,6 +79,7 @@ class ProductSummaryResponse(BaseModel):
     id: int
     merchant_id: int
     category_id: int
+    brand: str | None = None
     title: str
     cover_image: str | None = None
     price: int

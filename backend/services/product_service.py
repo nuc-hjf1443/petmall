@@ -46,6 +46,7 @@ def _product_detail(
         id=product.id,
         merchant_id=product.merchant_id,
         category_id=product.category_id,
+        brand=product.brand,
         title=product.title,
         cover_image=product.cover_image,
         price=product.price,
@@ -219,6 +220,7 @@ async def get_products(
     max_price: int | None,
     page: int,
     page_size: int,
+    sort: str,
 ) -> ProductListResponse:
     category_ids = await _category_subtree_ids(db, category_id)
     products, total = await list_public_products(
@@ -231,6 +233,7 @@ async def get_products(
         max_price=max_price,
         page=page,
         page_size=page_size,
+        sort=sort,
     )
     return ProductListResponse(items=products, total=total, page=page, page_size=page_size)
 
@@ -267,6 +270,7 @@ async def create_merchant_product(
     product = Product(
         merchant_id=merchant_id,
         category_id=category.id,
+        brand=payload.brand,
         title=payload.title,
         description=payload.description,
         applicable_pet_type=payload.applicable_pet_type,
