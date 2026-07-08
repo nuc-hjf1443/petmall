@@ -10,6 +10,14 @@
 					</view>
 				</view>
 				<button class="new-chat" @click="reset">＋ 新建导购</button>
+				<view v-if="pets.length" class="pet-picker-card">
+					<view class="panel-heading">
+						<text>当前宠物</text>
+					</view>
+					<picker :range="petPickerOptions" range-key="label" :value="selectedPetIndex" @change="selectPet">
+						<view class="pet-picker-value">{{ selectedPetName }}</view>
+					</picker>
+				</view>
 				<view class="summary-card">
 					<view class="panel-heading">
 						<text>我的需求摘要</text>
@@ -86,6 +94,19 @@
 						<view class="message-avatar">{{ msg.role === 'user' ? '我' : '荐' }}</view>
 						<view class="bubble"><text>{{ displayMessageContent(msg) }}</text></view>
 					</view>
+					<view v-if="nextQuestions.length" class="question-panel">
+						<view v-for="question in nextQuestions" :key="question.key" class="question-item">
+							<text class="question-title">{{ question.question }}</text>
+							<view class="question-options">
+								<button
+									v-for="option in question.options"
+									:key="option.value || option.label"
+									:disabled="sending"
+									@click="answerGuideOption(option)"
+								>{{ option.label }}</button>
+							</view>
+						</view>
+					</view>
 					<view v-if="recommendations.length" class="recommendations">
 						<text class="recommend-intro">根据你的需求，我筛选了以下真实在售商品，兼顾适配度、价格和库存。</text>
 						<view class="product-grid">
@@ -118,7 +139,7 @@
 
 <script>
 import AppShell from '../../components/AppShell.vue'
-import { aiApi, assetUrl } from '../../api'
+import { aiApi, assetUrl, petApi } from '../../api'
 
 export default {
 	components: { AppShell },
@@ -128,6 +149,11 @@ export default {
 			input: '',
 			messages: [],
 			recommendations: [],
+			guideState: null,
+			nextQuestions: [],
+			requiresUserConfirmation: false,
+			pets: [],
+			selectedPetId: null,
 			historySessions: [],
 			loadingHistory: false,
 			summaryEditing: false,
@@ -157,7 +183,24 @@ export default {
 			]
 		}
 	},
+	computed: {
+		petPickerOptions() {
+			return [
+				{ id: null, label: '不指定宠物' },
+				...this.pets.map(pet => ({ id: pet.id, label: `${pet.name} · ${this.petTypeText(pet.pet_type)}` }))
+			]
+		},
+		selectedPetIndex() {
+			const index = this.petPickerOptions.findIndex(item => item.id === this.selectedPetId)
+			return index >= 0 ? index : 0
+		},
+		selectedPetName() {
+			const option = this.petPickerOptions[this.selectedPetIndex]
+			return (option && option.label) || '不指定宠物'
+		}
+	},
 	mounted() {
+		this.loadPets()
 		this.loadHistory()
 	},
 	methods: {
@@ -175,11 +218,41 @@ export default {
 			this.input = ''
 			this.messages = []
 			this.recommendations = []
+			this.guideState = null
+			this.nextQuestions = []
+			this.requiresUserConfirmation = false
 			this.demandSummary = this.emptySummary()
 			this.summaryEditing = false
 			this.summaryFocusKey = ''
 			this.showMoreDemand = false
 			this.moreDemandFocus = false
+		},
+		async loadPets() {
+			if (!uni.getStorageSync('access_token')) return
+			try {
+				const response = await petApi.list()
+				this.pets = Array.isArray(response) ? response : []
+			} catch (error) {
+				this.pets = []
+			}
+		},
+		selectPet(event) {
+			const index = Number(event.detail.value || 0)
+			const option = this.petPickerOptions[index] || this.petPickerOptions[0]
+			this.selectedPetId = option.id
+			this.sessionId = null
+			this.messages = []
+			this.recommendations = []
+			this.nextQuestions = []
+			this.guideState = null
+		},
+		petTypeText(type) {
+			const map = { dog: '狗', cat: '猫' }
+			return map[type] || type || '宠物'
+		},
+		answerGuideOption(option) {
+			this.input = option.value || option.label || ''
+			this.send()
 		},
 		ask(text) {
 			this.input = text
@@ -220,15 +293,22 @@ export default {
 			this.mergeParsedDemand(content)
 			const guideContent = this.buildGuideContent(content)
 			this.messages.push({ role: 'user', content })
+			this.nextQuestions = []
 			this.sending = true
 			this.scroll()
 			try {
 				if (!this.sessionId) {
-					this.sessionId = (await aiApi.createGuideSession({ title: this.makeSessionTitle(content) })).id
+					const payload = { title: this.makeSessionTitle(content) }
+					if (this.selectedPetId) payload.pet_id = this.selectedPetId
+					this.sessionId = (await aiApi.createGuideSession(payload)).id
 				}
 				const response = await aiApi.sendGuideMessage(this.sessionId, { content: guideContent, limit: 5 })
 				this.messages.push(response.assistant_message)
 				this.recommendations = response.recommendations || []
+				this.guideState = response.guide_state || null
+				this.nextQuestions = response.next_questions || []
+				this.requiresUserConfirmation = !!response.requires_user_confirmation
+				this.applyGuideState(this.guideState)
 				this.loadHistory()
 			} catch (error) {
 				this.messages.push({ role: 'assistant', content: `暂时无法生成推荐：${error.message}` })
@@ -258,6 +338,10 @@ export default {
 				const latestUserMessage = this.messages.filter(message => message.role === 'user').slice(-1)[0]
 				this.demandSummary = latestUserMessage ? this.parseDemand(latestUserMessage.content) : this.emptySummary()
 				this.recommendations = await aiApi.guideRecommendations(session.id)
+				this.guideState = null
+				this.nextQuestions = []
+				this.requiresUserConfirmation = false
+				this.selectedPetId = session.pet_id || null
 				this.scroll()
 			} catch (error) {
 				uni.showToast({ title: '历史会话加载失败', icon: 'none' })
@@ -326,6 +410,32 @@ export default {
 					this.demandSummary[key] = parsed[key]
 				}
 			})
+		},
+		applyGuideState(state) {
+			const slots = (state && state.slots) || {}
+			const nextSummary = { ...this.demandSummary }
+			if (slots.budget) nextSummary.budget = `${slots.budget} 元`
+			if (slots.category) nextSummary.purpose = this.categoryText(slots.category)
+			if (Array.isArray(slots.preferences) && slots.preferences.length) {
+				nextSummary.preference = slots.preferences.join('、')
+			}
+			if (slots.pet_name) {
+				nextSummary.other = `宠物：${slots.pet_name}`
+			}
+			this.demandSummary = nextSummary
+			if (slots.pet_id) this.selectedPetId = slots.pet_id
+		},
+		categoryText(category) {
+			const map = {
+				food: '主粮',
+				freeze_dried: '冻干',
+				snack: '零食',
+				toy: '玩具',
+				bath: '洗护',
+				litter: '猫砂',
+				leash: '牵引'
+			}
+			return map[category] || category
 		},
 		buildGuideContent(question) {
 			const labels = {
@@ -454,6 +564,28 @@ export default {
 	color: var(--color-primary);
 	font-size: 12px;
 	line-height: 38px;
+}
+.pet-picker-card {
+	width: 100%;
+	margin-bottom: 12px;
+	padding: 12px 14px;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	background: var(--color-surface);
+	box-shadow: var(--shadow-card);
+}
+.pet-picker-value {
+	overflow: hidden;
+	height: 34px;
+	padding: 0 12px;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	background: #fffaf6;
+	color: var(--color-text);
+	font-size: 12px;
+	line-height: 34px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 .summary-card,
 .history-card,
@@ -738,6 +870,42 @@ export default {
 	color: #fff;
 }
 .typing { color: var(--color-text-secondary); }
+.question-panel {
+	max-width: 880px;
+	margin: 8px auto 20px;
+	padding-left: 44px;
+}
+.question-item {
+	margin-top: 10px;
+	padding: 14px;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	background: #fffaf6;
+}
+.question-title {
+	display: block;
+	color: var(--color-text);
+	font-size: 13px;
+	font-weight: 700;
+	line-height: 1.6;
+}
+.question-options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 10px;
+}
+.question-options button {
+	height: 30px;
+	margin: 0;
+	padding: 0 13px;
+	border: 1px solid var(--color-border);
+	border-radius: 15px;
+	background: #fff;
+	color: var(--color-primary);
+	font-size: 11px;
+	line-height: 28px;
+}
 .recommendations {
 	max-width: 980px;
 	margin: 8px auto 24px;

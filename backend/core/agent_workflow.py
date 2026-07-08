@@ -35,12 +35,16 @@ class GuideRecommendationState(TypedDict, total=False):
 
 class GuideWorkflowState(TypedDict, total=False):
     question: str
+    session_id: int | None
     risk_level: str
     history: list[dict[str, str]]
     history_summary: str
     rag_context: str
     pet_summary: dict[str, Any] | None
     products: list[dict[str, Any]]
+    guide_state: dict[str, Any]
+    next_questions: list[dict[str, Any]]
+    requires_user_confirmation: bool
     answer: str
     recommendations: list[GuideRecommendationState]
     references: str | None
@@ -279,6 +283,177 @@ async def run_qa_agent_workflow(
         }
 
 
+def _guide_slots(guide_state: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(guide_state, dict):
+        return {}
+    slots = guide_state.get("slots")
+    return slots if isinstance(slots, dict) else {}
+
+
+def _guide_missing_slots(slots: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if not slots.get("pet_id") and not slots.get("pet_type"):
+        missing.append("pet")
+    if not slots.get("category"):
+        missing.append("category")
+    if (
+        not slots.get("budget")
+        and not slots.get("preferences")
+        and not (slots.get("category") and (slots.get("pet_id") or slots.get("pet_type")))
+    ):
+        missing.append("budget_or_preference")
+    return missing
+
+
+def _build_guide_next_questions(missing_slots: list[str]) -> list[dict[str, Any]]:
+    question_map = {
+        "pet": {
+            "key": "pet",
+            "question": "\u8bf7\u5148\u544a\u8bc9\u6211\u8981\u7ed9\u54ea\u4e2a\u5ba0\u7269\u4e70\uff1f",
+            "options": [
+                {"label": "\u72d7\u72d7", "value": "\u7ed9\u72d7\u72d7\u4e70"},
+                {"label": "\u732b\u54aa", "value": "\u7ed9\u732b\u54aa\u4e70"},
+            ],
+        },
+        "category": {
+            "key": "category",
+            "question": "\u8fd9\u6b21\u4e3b\u8981\u60f3\u4e70\u54ea\u7c7b\u5546\u54c1\uff1f",
+            "options": [
+                {"label": "\u4e3b\u7cae", "value": "\u4e3b\u7cae"},
+                {"label": "\u96f6\u98df\u51bb\u5e72", "value": "\u96f6\u98df\u51bb\u5e72"},
+                {"label": "\u73a9\u5177", "value": "\u73a9\u5177"},
+                {"label": "\u6d17\u62a4\u7528\u54c1", "value": "\u6d17\u62a4\u7528\u54c1"},
+            ],
+        },
+        "budget_or_preference": {
+            "key": "budget_or_preference",
+            "question": "\u6709\u9884\u7b97\u6216\u504f\u597d\u5417\uff1f",
+            "options": [
+                {"label": "100 \u5143\u4ee5\u5185", "value": "\u9884\u7b97 100 \u5143\u4ee5\u5185"},
+                {"label": "300 \u5143\u4ee5\u5185", "value": "\u9884\u7b97 300 \u5143\u4ee5\u5185"},
+                {"label": "\u4f4e\u654f", "value": "\u504f\u597d\u4f4e\u654f"},
+                {"label": "\u8010\u54ac", "value": "\u504f\u597d\u8010\u54ac"},
+            ],
+        },
+    }
+    return [question_map[key] for key in missing_slots if key in question_map][:2]
+
+
+def _build_guide_clarification_answer(next_questions: list[dict[str, Any]]) -> str:
+    if not next_questions:
+        return "\u6211\u9700\u8981\u518d\u786e\u8ba4\u4e00\u70b9\u9700\u6c42\uff0c\u7136\u540e\u518d\u4ece\u771f\u5b9e\u5728\u552e\u5546\u54c1\u91cc\u7b5b\u9009\u3002"
+    lines = ["\u4e3a\u4e86\u907f\u514d\u4e71\u63a8\u8350\uff0c\u6211\u9700\u8981\u5148\u786e\u8ba4\u4e00\u4e0b\u5173\u952e\u9700\u6c42\uff1a"]
+    for index, item in enumerate(next_questions, start=1):
+        lines.append(f"{index}. {item.get('question')}")
+    return "\n".join(lines)
+
+
+async def _parse_guide_request_node(state: GuideWorkflowState) -> GuideWorkflowState:
+    guide_state = dict(state.get("guide_state") or {})
+    slots = dict(_guide_slots(guide_state))
+    if state.get("pet_summary"):
+        pet_summary = state["pet_summary"] or {}
+        if pet_summary.get("id"):
+            slots["pet_id"] = pet_summary.get("id")
+        if pet_summary.get("name"):
+            slots["pet_name"] = pet_summary.get("name")
+        if pet_summary.get("pet_type"):
+            slots["pet_type"] = pet_summary.get("pet_type")
+
+    missing_slots = _guide_missing_slots(slots)
+    guide_state["slots"] = slots
+    guide_state["missing_slots"] = missing_slots
+    guide_state["stage"] = "clarifying" if missing_slots else "recommending"
+    return {**state, "guide_state": guide_state}
+
+
+def _route_guide_request(state: GuideWorkflowState) -> str:
+    return "ask_clarification" if state.get("guide_state", {}).get("missing_slots") else "generate_answer"
+
+
+async def _ask_guide_clarification_node(state: GuideWorkflowState) -> GuideWorkflowState:
+    guide_state = dict(state.get("guide_state") or {})
+    missing_slots = list(guide_state.get("missing_slots") or [])
+    next_questions = _build_guide_next_questions(missing_slots)
+    risk_level = state.get("risk_level", "normal")
+    answer = _build_guide_clarification_answer(next_questions)
+    return {
+        **state,
+        "answer": _enforce_guide_safety(answer, risk_level),
+        "recommendations": [],
+        "references": None,
+        "next_questions": next_questions,
+        "requires_user_confirmation": True,
+    }
+
+
+async def _generate_guide_answer_node(state: GuideWorkflowState) -> GuideWorkflowState:
+    product_candidates = state.get("products") or []
+    risk_level = state.get("risk_level", "normal")
+    try:
+        answer = await _call_deepseek_guide(
+            state.get("question", ""),
+            risk_level,
+            state.get("pet_summary"),
+            product_candidates,
+            state.get("history"),
+            state.get("history_summary"),
+            state.get("rag_context"),
+        )
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_llm_failed",
+            extra={
+                "stage": "llm",
+                "session_id": state.get("session_id"),
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        answer = None
+    if answer is None:
+        answer = build_rule_based_guide_answer(risk_level, product_candidates, state.get("pet_summary"))
+    return {
+        **state,
+        "answer": _enforce_guide_safety(answer, risk_level),
+        "recommendations": _build_guide_recommendations(
+            product_candidates,
+            len(product_candidates),
+            state.get("rag_context"),
+            state.get("pet_summary"),
+        ),
+        "references": _build_references(state.get("rag_context")),
+        "next_questions": [],
+        "requires_user_confirmation": False,
+    }
+
+
+def _build_guide_graph():
+    from langgraph.graph import END, StateGraph
+
+    graph = StateGraph(GuideWorkflowState)
+    graph.add_node("parse_request", _parse_guide_request_node)
+    graph.add_node("ask_clarification", _ask_guide_clarification_node)
+    graph.add_node("generate_answer", _generate_guide_answer_node)
+    graph.set_entry_point("parse_request")
+    graph.add_conditional_edges(
+        "parse_request",
+        _route_guide_request,
+        {
+            "ask_clarification": "ask_clarification",
+            "generate_answer": "generate_answer",
+        },
+    )
+    graph.add_edge("ask_clarification", END)
+    graph.add_edge("generate_answer", END)
+    return graph
+
+
+@lru_cache(maxsize=1)
+def _compile_guide_graph_without_checkpointer():
+    return _build_guide_graph().compile()
+
+
 def _first_in_stock_sku(product: dict[str, Any]) -> dict[str, Any] | None:
     for sku in product.get("skus") or []:
         if sku.get("is_enabled", True) and int(sku.get("stock") or 0) > 0:
@@ -508,46 +683,45 @@ async def run_guide_agent_workflow(
     rag_context: str | None = None,
     history: list[dict[str, str]] | None = None,
     history_summary: str | None = None,
+    guide_state: dict[str, Any] | None = None,
     session_id: int | None = None,
 ) -> GuideWorkflowState:
     product_candidates = products or []
-    try:
-        answer = await _call_deepseek_guide(
-            question,
-            risk_level,
-            pet_summary,
-            product_candidates,
-            history,
-            history_summary,
-            rag_context,
-        )
-    except Exception as exc:
-        logger.exception(
-            "guide_agent_llm_failed",
-            extra={
-                "stage": "llm",
-                "session_id": session_id,
-                "exception_type": type(exc).__name__,
-                "error": str(exc),
-            },
-        )
-        answer = None
-    if answer is None:
-        answer = build_rule_based_guide_answer(risk_level, product_candidates, pet_summary)
-    return {
+    state: GuideWorkflowState = {
         "question": question,
+        "session_id": session_id,
         "risk_level": risk_level,
         "history": history or [],
         "history_summary": history_summary or "",
         "rag_context": rag_context or "",
         "pet_summary": pet_summary,
         "products": product_candidates,
-        "answer": _enforce_guide_safety(answer, risk_level),
-        "recommendations": _build_guide_recommendations(
-            product_candidates,
-            len(product_candidates),
-            rag_context,
-            pet_summary,
-        ),
-        "references": _build_references(rag_context),
+        "guide_state": guide_state or {},
     }
+    try:
+        graph = _compile_guide_graph_without_checkpointer()
+        return await graph.ainvoke(state)
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_workflow_failed",
+            extra={
+                "stage": "workflow",
+                "session_id": session_id,
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        answer = build_rule_based_guide_answer(risk_level, product_candidates, pet_summary)
+        return {
+            **state,
+            "answer": _enforce_guide_safety(answer, risk_level),
+            "recommendations": _build_guide_recommendations(
+                product_candidates,
+                len(product_candidates),
+                rag_context,
+                pet_summary,
+            ),
+            "references": _build_references(rag_context),
+            "next_questions": [],
+            "requires_user_confirmation": False,
+        }

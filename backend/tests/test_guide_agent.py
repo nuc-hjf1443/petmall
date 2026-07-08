@@ -1,3 +1,4 @@
+import json
 import logging
 
 from httpx import AsyncClient
@@ -67,6 +68,43 @@ async def seed_catalog(session_factory) -> dict[str, int]:
         return result
 
 
+async def seed_dog_freeze_dried_catalog(session_factory) -> dict[str, int]:
+    async with session_factory() as session:
+        category = ProductCategory(name="Guide Dog Treat", sort_order=11)
+        session.add(category)
+        await session.flush()
+
+        product = Product(
+            merchant_id=3002,
+            category_id=category.id,
+            title="Dog Freeze Dried Treat",
+            cover_image="/dog-freeze-dried.png",
+            price=6999,
+            original_price=7999,
+            stock=5,
+            status=ProductStatus.ON_SALE.value,
+            description="\u72d7\u72d7\u51bb\u5e72\u96f6\u98df",
+            applicable_pet_type="dog",
+        )
+        session.add(product)
+        await session.flush()
+
+        sku = ProductSku(
+            product_id=product.id,
+            sku_code="GUIDE-DOG-FREEZE-DRIED",
+            name="500 g",
+            specs={"weight": "500g"},
+            price=6999,
+            original_price=7999,
+            stock=5,
+        )
+        session.add(sku)
+        await session.flush()
+        result = {"product_id": product.id, "sku_id": sku.id}
+        await session.commit()
+        return result
+
+
 async def create_pet(client: AsyncClient, token: str) -> int:
     created = await client.post(
         "/pets",
@@ -76,6 +114,21 @@ async def create_pet(client: AsyncClient, token: str) -> int:
             "pet_type": "cat",
             "breed": "Ragdoll",
             "weight": 3.8,
+        },
+    )
+    assert created.status_code == 200, created.text
+    return created.json()["id"]
+
+
+async def create_dog_pet(client: AsyncClient, token: str) -> int:
+    created = await client.post(
+        "/pets",
+        headers=auth_headers(token),
+        json={
+            "name": "\u53ef\u4e50",
+            "pet_type": "dog",
+            "breed": "Border Collie",
+            "weight": 12.5,
         },
     )
     assert created.status_code == 200, created.text
@@ -469,7 +522,7 @@ async def test_guide_agent_truncates_history_and_persists_summary(
     async with session_factory() as session:
         stored_session = await session.get(AgentSession, session_id)
         assert stored_session is not None
-        assert stored_session.context_summary == "summary text"
+        assert json.loads(stored_session.context_summary)["history_summary"] == "summary text"
 
 
 async def test_guide_agent_lists_history_and_restores_latest_recommendations(
@@ -570,7 +623,7 @@ async def test_guide_agent_lists_history_and_restores_latest_recommendations(
     assert deleted_history.json()["items"] == []
 
 
-async def test_guide_agent_falls_back_to_sale_products_when_query_has_no_exact_match(
+async def test_guide_agent_returns_no_recommendations_when_query_has_no_match(
     test_context,
     strong_password,
     monkeypatch,
@@ -578,7 +631,7 @@ async def test_guide_agent_falls_back_to_sale_products_when_query_has_no_exact_m
     client: AsyncClient = test_context["client"]
     cache = test_context["cache"]
     session_factory = test_context["session_factory"]
-    ids = await seed_catalog(session_factory)
+    await seed_catalog(session_factory)
 
     async def empty_retrieve_private_knowledge(*args, **kwargs):
         return []
@@ -599,7 +652,7 @@ async def test_guide_agent_falls_back_to_sale_products_when_query_has_no_exact_m
     created_session = await client.post(
         "/agents/guide/sessions",
         headers=auth_headers(token),
-        json={"title": "fallback guide"},
+        json={"title": "no match guide"},
     )
     assert created_session.status_code == 200, created_session.text
     session_id = created_session.json()["id"]
@@ -611,9 +664,90 @@ async def test_guide_agent_falls_back_to_sale_products_when_query_has_no_exact_m
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert "当前在售商品" in body["assistant_message"]["content"]
+    assert body["recommendations"] == []
+
+    async with session_factory() as session:
+        result = await session.execute(select(AgentRecommendation))
+        assert result.scalars().all() == []
+
+
+async def test_guide_agent_asks_questions_before_recommending_when_request_is_incomplete(
+    test_context,
+    strong_password,
+):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+
+    await register_user(client, cache, "13960000017", strong_password)
+    token = await login_user(client, "13960000017", strong_password)
+
+    created_session = await client.post(
+        "/agents/guide/sessions",
+        headers=auth_headers(token),
+        json={"title": "clarify guide"},
+    )
+    assert created_session.status_code == 200, created_session.text
+    session_id = created_session.json()["id"]
+
+    response = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "\u60f3\u4e70\u70b9\u4e1c\u897f", "limit": 3},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["requires_user_confirmation"] is True
+    assert body["recommendations"] == []
+    assert body["next_questions"]
+    assert body["guide_state"]["stage"] == "clarifying"
+
+
+async def test_guide_agent_matches_pet_name_and_recommends_real_products(
+    test_context,
+    strong_password,
+    monkeypatch,
+):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    session_factory = test_context["session_factory"]
+    ids = await seed_dog_freeze_dried_catalog(session_factory)
+
+    async def empty_retrieve_private_knowledge(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "services.guide_agent_service.retrieve_private_knowledge",
+        empty_retrieve_private_knowledge,
+    )
+
+    await register_user(client, cache, "13960000018", strong_password)
+    token = await login_user(client, "13960000018", strong_password)
+    pet_id = await create_dog_pet(client, token)
+
+    created_session = await client.post(
+        "/agents/guide/sessions",
+        headers=auth_headers(token),
+        json={"title": "pet name guide"},
+    )
+    assert created_session.status_code == 200, created_session.text
+    session_id = created_session.json()["id"]
+
+    response = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "\u7ed9\u6211\u7684\u53ef\u4e50\u63a8\u8350\u51bb\u5e72\uff0c\u9884\u7b97 100 \u5143", "limit": 3},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["requires_user_confirmation"] is False
     assert len(body["recommendations"]) == 1
     assert body["recommendations"][0]["product_id"] == ids["product_id"]
+    assert body["guide_state"]["slots"]["pet_id"] == pet_id
+    assert body["guide_state"]["slots"]["pet_name"] == "\u53ef\u4e50"
+
+    async with session_factory() as session:
+        stored_session = await session.get(AgentSession, session_id)
+        assert stored_session.pet_id == pet_id
 
 
 async def test_guide_agent_does_not_recommend_cat_products_for_dog_request(
