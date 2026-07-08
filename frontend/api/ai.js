@@ -34,8 +34,17 @@ export const aiApi = {
 		data,
 		auth: true
 	}),
+	sessions: (data = {}) => request({
+		url: '/agents/sessions',
+		data,
+		auth: true
+	}),
 	session: sessionId => request({
 		url: `/agents/sessions/${sessionId}`,
+		auth: true
+	}),
+	guideRecommendations: sessionId => request({
+		url: `/agents/guide/sessions/${sessionId}/recommendations`,
 		auth: true
 	})
 }
@@ -52,5 +61,7 @@ export const agentApi = {
 	sendQaMessage: aiApi.sendQaMessage,
 	createGuideSession: aiApi.createGuideSession,
 	sendGuideMessage: aiApi.sendGuideMessage,
+	sessions: aiApi.sessions,
+	guideRecommendations: aiApi.guideRecommendations,
 	session: aiApi.session
 }

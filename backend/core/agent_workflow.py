@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 import logging
 from typing import Any, TypedDict
@@ -27,12 +28,16 @@ class GuideRecommendationState(TypedDict, total=False):
     reason: str
     caution: str | None
     source: str
+    source_detail: str | None
+    score: float | None
+    matched_pet_fields: list[str]
 
 
 class GuideWorkflowState(TypedDict, total=False):
     question: str
     risk_level: str
     history: list[dict[str, str]]
+    history_summary: str
     rag_context: str
     pet_summary: dict[str, Any] | None
     products: list[dict[str, Any]]
@@ -41,11 +46,8 @@ class GuideWorkflowState(TypedDict, total=False):
     references: str | None
 
 
-GUIDE_MEDICAL_SAFETY_TEXT = (
-    "Medical, medication, prescription diet, or emergency content is for reference only "
-    "and cannot replace a veterinarian diagnosis."
-)
-GUIDE_HIGH_RISK_TEXT = "For possible emergency symptoms, contact an offline veterinarian as soon as possible."
+GUIDE_MEDICAL_SAFETY_TEXT = "涉及医疗、用药、处方粮或急症内容时，以下建议仅供参考，不能替代兽医诊断。"
+GUIDE_HIGH_RISK_TEXT = "你描述的情况可能存在急症风险，请尽快联系线下兽医或宠物医院。"
 
 
 def build_rule_based_qa_answer(risk_level: str) -> str:
@@ -279,28 +281,54 @@ def _build_guide_recommendations(
     products: list[dict[str, Any]],
     limit: int,
     rag_context: str | None,
+    pet_summary: dict[str, Any] | None = None,
 ) -> list[GuideRecommendationState]:
     recommendations: list[GuideRecommendationState] = []
     for product in products[:limit]:
         sku = _first_in_stock_sku(product)
         if sku is None:
             continue
+        matched_pet_fields = _matched_pet_fields(product, pet_summary)
+        source = "rag_enhanced" if rag_context else "product_search"
         recommendations.append(
             {
                 "product_id": int(product["id"]),
                 "sku_id": int(sku["id"]),
                 "rank": len(recommendations) + 1,
-                "reason": "Matched the current pet profile and the user's shopping request.",
-                "caution": "Check ingredients, size, and transition gradually when changing food.",
-                "source": "rag_enhanced" if rag_context else "product_search",
+                "reason": "匹配当前宠物档案和本次导购需求。",
+                "caution": "下单前请确认规格、成分和适用对象；换粮时建议逐步过渡。",
+                "source": source,
+                "source_detail": "rag_enhanced" if rag_context else "rule_based_ranked",
+                "score": 0.75 if matched_pet_fields else 0.6,
+                "matched_pet_fields": matched_pet_fields,
             }
         )
     return recommendations
 
 
+def _matched_pet_fields(product: dict[str, Any], pet_summary: dict[str, Any] | None) -> list[str]:
+    if not pet_summary:
+        return []
+    matched: list[str] = []
+    product_pet_type = product.get("applicable_pet_type")
+    if pet_summary.get("pet_type") and product_pet_type == pet_summary.get("pet_type"):
+        matched.append("pet_type")
+    searchable_text = f"{product.get('title') or ''} {product.get('description') or ''}".lower()
+    field_keywords = {
+        "allergy_notes": ["低敏", "敏感", "allergy", "sensitive"],
+        "diet_preference": ["粮", "food", "diet", "鸡肉", "牛肉", "鱼"],
+        "product_preference": ["玩具", "牵引", "猫砂", "用品"],
+    }
+    for field, keywords in field_keywords.items():
+        value = str(pet_summary.get(field) or "").strip()
+        if value and any(keyword.lower() in searchable_text or keyword.lower() in value.lower() for keyword in keywords):
+            matched.append(field)
+    return matched
+
+
 def _build_pet_summary_text(pet_summary: dict[str, Any] | None) -> str:
     if not pet_summary:
-        return "No pet profile was selected."
+        return "未选择宠物档案。"
     fields = [
         f"name={pet_summary.get('name')}",
         f"type={pet_summary.get('pet_type')}",
@@ -325,12 +353,68 @@ def _build_products_text(products: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def build_rule_based_guide_history_summary(
+    existing_summary: str | None,
+    history: list[dict[str, str]],
+    *,
+    max_chars: int = 1200,
+) -> str:
+    parts = []
+    if existing_summary:
+        parts.append(f"既有摘要：{existing_summary.strip()}")
+    if history:
+        lines = []
+        for item in history[-12:]:
+            role = item.get("role", "unknown")
+            content = str(item.get("content", "")).strip().replace("\n", " ")
+            if content:
+                lines.append(f"{role}: {content[:180]}")
+        if lines:
+            parts.append("历史要点：" + "；".join(lines))
+    summary = "\n".join(parts).strip()
+    return summary[:max_chars]
+
+
+async def summarize_guide_history(
+    *,
+    existing_summary: str | None,
+    history: list[dict[str, str]],
+    max_chars: int = 1200,
+) -> str:
+    settings = get_settings()
+    if settings.llm_provider != "deepseek" or not settings.llm_api_key:
+        return build_rule_based_guide_history_summary(existing_summary, history, max_chars=max_chars)
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_deepseek import ChatDeepSeek
+    except ImportError:
+        return build_rule_based_guide_history_summary(existing_summary, history, max_chars=max_chars)
+
+    llm = ChatDeepSeek(
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        temperature=0,
+    )
+    history_text = _normalize_history(history)
+    response = await llm.ainvoke(
+        [
+            SystemMessage(content="你是宠物导购会话摘要器。请保留用户需求、宠物信息、预算、偏好和已推荐方向，输出简短中文摘要，不要编造。"),
+            HumanMessage(content=f"既有摘要：{existing_summary or ''}\n\n需要合并的历史：\n{history_text}"),
+        ]
+    )
+    content = getattr(response, "content", None)
+    if isinstance(content, str) and content.strip():
+        return content.strip()[:max_chars]
+    return build_rule_based_guide_history_summary(existing_summary, history, max_chars=max_chars)
+
+
 async def _call_deepseek_guide(
     question: str,
     risk_level: str,
     pet_summary: dict[str, Any] | None,
     products: list[dict[str, Any]],
     history: list[dict[str, str]] | None,
+    history_summary: str | None,
     rag_context: str | None,
 ) -> str | None:
     settings = get_settings()
@@ -354,6 +438,7 @@ async def _call_deepseek_guide(
         f"Pet profile: {_build_pet_summary_text(pet_summary)}\n"
         f"Candidate products:\n{_build_products_text(products)}\n"
         f"RAG context:\n{rag_context or ''}\n"
+        f"Conversation summary:\n{history_summary or ''}\n"
         f"Recent history:\n{_normalize_history(history)}\n"
         f"User question: {question}"
     )
@@ -380,15 +465,15 @@ def build_rule_based_guide_answer(
     pet_summary: dict[str, Any] | None,
 ) -> str:
     if not products:
-        answer = "No matching on-sale products are available right now. Please refine the need or try another category."
+        answer = "暂时没有匹配到可售商品。你可以补充宠物类型、年龄、预算或换一个品类再试。"
     else:
         pet_part = ""
         if pet_summary:
             pet_name = pet_summary.get("name")
             pet_type = pet_summary.get("pet_type")
-            pet_part = f" for {pet_name or 'the selected pet'} ({pet_type or 'pet'})"
+            pet_part = f"，结合{pet_name or '所选宠物'}（{pet_type or '宠物'}）的档案"
         titles = ", ".join(str(product.get("title")) for product in products[:3] if product.get("title"))
-        answer = f"Based on the current pet profile{pet_part}, the available product candidates are: {titles}."
+        answer = f"我从当前在售商品中{pet_part}为你筛选了这些候选商品：{titles}。推荐结果会以商品卡片为准，价格和库存以商城数据为准。"
     if risk_level == "high":
         return f"{answer}\n\n{GUIDE_HIGH_RISK_TEXT} {GUIDE_MEDICAL_SAFETY_TEXT}"
     if risk_level == "medical":
@@ -398,9 +483,9 @@ def build_rule_based_guide_answer(
 
 def _enforce_guide_safety(answer: str, risk_level: str) -> str:
     result = answer.strip()
-    if risk_level in {"medical", "high"} and "cannot replace a veterinarian diagnosis" not in result:
+    if risk_level in {"medical", "high"} and "不能替代兽医诊断" not in result:
         result = f"{result}\n\n{GUIDE_MEDICAL_SAFETY_TEXT}"
-    if risk_level == "high" and "offline veterinarian" not in result:
+    if risk_level == "high" and "宠物医院" not in result and "兽医" not in result:
         result = f"{result}\n\n{GUIDE_HIGH_RISK_TEXT}"
     return result
 
@@ -413,6 +498,7 @@ async def run_guide_agent_workflow(
     products: list[dict[str, Any]] | None = None,
     rag_context: str | None = None,
     history: list[dict[str, str]] | None = None,
+    history_summary: str | None = None,
     session_id: int | None = None,
 ) -> GuideWorkflowState:
     product_candidates = products or []
@@ -423,9 +509,19 @@ async def run_guide_agent_workflow(
             pet_summary,
             product_candidates,
             history,
+            history_summary,
             rag_context,
         )
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "guide_agent_llm_failed",
+            extra={
+                "stage": "llm",
+                "session_id": session_id,
+                "exception_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
         answer = None
     if answer is None:
         answer = build_rule_based_guide_answer(risk_level, product_candidates, pet_summary)
@@ -433,6 +529,7 @@ async def run_guide_agent_workflow(
         "question": question,
         "risk_level": risk_level,
         "history": history or [],
+        "history_summary": history_summary or "",
         "rag_context": rag_context or "",
         "pet_summary": pet_summary,
         "products": product_candidates,
@@ -441,6 +538,7 @@ async def run_guide_agent_workflow(
             product_candidates,
             len(product_candidates),
             rag_context,
+            pet_summary,
         ),
         "references": _build_references(rag_context),
     }

@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TimestampMixin
@@ -12,6 +12,7 @@ class AgentSession(Base, TimestampMixin):
     agent_type: Mapped[str] = mapped_column(String(32), default="qa", index=True, nullable=False)
     title: Mapped[str | None] = mapped_column(String(128), nullable=True)
     pet_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    context_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     messages: Mapped[list["AgentMessage"]] = relationship(
         back_populates="session",
@@ -56,6 +57,9 @@ class AgentRecommendation(Base, TimestampMixin):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     caution: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(32), default="product_search", nullable=False)
+    source_detail: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    matched_pet_fields: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped[AgentSession] = relationship(back_populates="recommendations")
     message: Mapped[AgentMessage] = relationship(back_populates="recommendations")
