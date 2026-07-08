@@ -11,6 +11,7 @@ class QaSessionCreate(BaseModel):
 
 class QaMessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
+    async_mode: bool = False
 
 
 class GuideSessionCreate(BaseModel):
@@ -48,10 +49,24 @@ class AgentSessionResponse(BaseModel):
     updated_at: datetime
 
 
+class AgentSessionListItem(BaseModel):
+    id: int
+    agent_type: str
+    title: str | None = None
+    pet_id: int | None = None
+    last_message: str | None = None
+    last_role: str | None = None
+    message_count: int = 0
+    is_pending: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 class QaAnswerResponse(BaseModel):
     session_id: int
     user_message: AgentMessageResponse
-    assistant_message: AgentMessageResponse
+    assistant_message: AgentMessageResponse | None = None
+    status: str = "completed"
 
 
 class GuideRecommendationResponse(BaseModel):

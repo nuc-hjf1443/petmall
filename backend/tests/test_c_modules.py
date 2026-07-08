@@ -553,6 +553,22 @@ async def test_qa_agent_medical_and_high_risk_safety_prompt(test_context, strong
     assert detail.status_code == 200
     assert len(detail.json()["messages"]) == 4
 
+    sessions = await client.get("/agents/qa/sessions", headers=auth_headers(token))
+    assert sessions.status_code == 200
+    assert sessions.json()[0]["id"] == session_id
+    assert sessions.json()[0]["message_count"] == 4
+    assert sessions.json()[0]["last_role"] == "assistant"
+
+    deleted = await client.delete(f"/agents/qa/sessions/{session_id}", headers=auth_headers(token))
+    assert deleted.status_code == 200
+
+    missing = await client.get(f"/agents/sessions/{session_id}", headers=auth_headers(token))
+    assert missing.status_code == 404
+
+    empty_sessions = await client.get("/agents/qa/sessions", headers=auth_headers(token))
+    assert empty_sessions.status_code == 200
+    assert empty_sessions.json() == []
+
 
 async def test_qa_agent_workflow_accepts_session_id_without_memory_dsn():
     result = await run_qa_agent_workflow(
@@ -563,3 +579,21 @@ async def test_qa_agent_workflow_accepts_session_id_without_memory_dsn():
     )
     assert result["answer"]
     assert result["risk_level"] == "normal"
+
+
+async def test_agent_memory_status_requires_auth_and_reports_dependency(test_context, strong_password):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+
+    unauthorized = await client.get("/agents/memory/status")
+    assert unauthorized.status_code == 401
+
+    await register_user(client, cache, "13800138108", strong_password)
+    token = await login_user(client, "13800138108", strong_password)
+
+    response = await client.get("/agents/memory/status", headers=auth_headers(token))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "postgres"
+    assert body["dependency_available"] is True
+    assert body["thread_id_pattern"] == "qa_session:{session_id}"

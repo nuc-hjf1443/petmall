@@ -105,9 +105,9 @@ Pull the embedding model inside the Ollama container before processing knowledge
 docker compose exec ollama ollama pull nomic-embed-text
 ```
 
-## Optional LangGraph Memory
+## Optional AI Assistant LangGraph Memory
 
-Start PostgreSQL for LangGraph checkpoint memory:
+Start PostgreSQL for AI assistant LangGraph checkpoint memory:
 
 ```powershell
 cd deploy
@@ -120,6 +120,8 @@ Then set `PETMALL_AGENT_MEMORY_POSTGRES_DSN` in `deploy/.env`, for example:
 PETMALL_AGENT_MEMORY_POSTGRES_DSN=postgresql://petmall:change_me@postgres:5432/petmall_agent
 PETMALL_AGENT_MEMORY_SETUP_ON_START=true
 ```
+
+This checkpoint memory is currently used by the AI pet care QA assistant. MySQL still stores user-visible chat sessions and messages.
 
 ## Notes
 
