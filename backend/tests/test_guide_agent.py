@@ -547,6 +547,28 @@ async def test_guide_agent_lists_history_and_restores_latest_recommendations(
     )
     assert cross_user_recommendations.status_code == 404
 
+    cross_user_delete = await client.delete(
+        f"/agents/sessions/{session_id}",
+        headers=auth_headers(other_token),
+        params={"agent_type": "guide"},
+    )
+    assert cross_user_delete.status_code == 404
+
+    deleted = await client.delete(
+        f"/agents/sessions/{session_id}",
+        headers=auth_headers(token),
+        params={"agent_type": "guide"},
+    )
+    assert deleted.status_code == 200
+
+    deleted_history = await client.get(
+        "/agents/sessions",
+        headers=auth_headers(token),
+        params={"agent_type": "guide"},
+    )
+    assert deleted_history.status_code == 200
+    assert deleted_history.json()["items"] == []
+
 
 async def test_guide_agent_falls_back_to_sale_products_when_query_has_no_exact_match(
     test_context,

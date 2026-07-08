@@ -69,7 +69,10 @@ async def get_user_session(
         filters.append(AgentSession.agent_type == agent_type)
     result = await db.execute(
         select(AgentSession)
-        .options(selectinload(AgentSession.messages))
+        .options(
+            selectinload(AgentSession.messages),
+            selectinload(AgentSession.recommendations),
+        )
         .where(*filters)
     )
     session = result.scalar_one_or_none()
@@ -171,6 +174,17 @@ async def list_qa_sessions(db: AsyncSession, user_id: int) -> list[dict]:
 
 async def delete_qa_session(db: AsyncSession, user_id: int, session_id: int) -> None:
     session = await get_user_session(db, user_id, session_id, agent_type="qa")
+    await db.delete(session)
+    await db.commit()
+
+
+async def delete_user_session(
+    db: AsyncSession,
+    user_id: int,
+    session_id: int,
+    agent_type: str | None = None,
+) -> None:
+    session = await get_user_session(db, user_id, session_id, agent_type=agent_type)
     await db.delete(session)
     await db.commit()
 
