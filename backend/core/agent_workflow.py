@@ -7,8 +7,8 @@ from settings.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-MEDICAL_SAFETY_TEXT = "以下内容仅供参考，不能替代兽医诊断。"
-HIGH_RISK_TEXT = "你描述的情况可能存在急症风险，请尽快联系线下兽医或宠物医院。"
+MEDICAL_SAFETY_TEXT = "小提醒：以下内容只适合做日常参考，不能替代兽医诊断。"
+HIGH_RISK_TEXT = "你描述的情况可能有急症风险，请尽快联系线下兽医或宠物医院。"
 
 
 class QaWorkflowState(TypedDict, total=False):
@@ -49,26 +49,35 @@ GUIDE_HIGH_RISK_TEXT = "For possible emergency symptoms, contact an offline vete
 
 
 def build_rule_based_qa_answer(risk_level: str) -> str:
-    base = "我会先根据你提供的信息给出日常养宠建议。"
+    base = "我先按你提供的信息，给一份温和版的日常养宠建议。"
     if risk_level == "high":
-        return f"{base} {HIGH_RISK_TEXT}{MEDICAL_SAFETY_TEXT}"
+        return f"{base}\n\n{HIGH_RISK_TEXT}\n\n{MEDICAL_SAFETY_TEXT}"
     if risk_level == "medical":
         return (
-            f"{base} 涉及医疗、用药、疫苗或驱虫时，{MEDICAL_SAFETY_TEXT}"
-            "不要自行使用处方药或调整剂量。"
+            f"{base}\n\n{MEDICAL_SAFETY_TEXT}\n\n"
+            "建议：不要自行使用处方药或调整剂量，先记录症状、饮食和精神状态，再给兽医判断。"
         )
-    return f"{base} 当前问题暂未命中医疗高风险规则，后续可接入平台知识库和私人知识库后给出更具体回答。"
+    return (
+        f"{base}\n\n"
+        "建议：\n"
+        "1. 先观察宝贝的精神、食欲、排便和饮水变化。\n"
+        "2. 如果症状持续或加重，及时联系兽医会更安心。\n"
+        "3. 你也可以补充年龄、品种、体重和最近变化，我再帮你细化。"
+    )
 
 
 def _build_system_prompt(risk_level: str, has_rag_context: bool) -> str:
     rag_instruction = (
-        "已提供 RAG 检索摘要时，可以基于摘要回答，但不能夸大为完整诊断；"
+        "已提供 RAG 检索摘要时，可以基于摘要回答，但不能夸大成完整诊断。"
         if has_rag_context
         else "当前没有可用 RAG 检索摘要，不能声称引用了私人知识库、平台知识库或宠物档案。"
     )
     return (
         "你是宠物综合服务平台的养宠知识问答助手。"
-        "请用中文回答，表达清晰、谨慎、可执行。"
+        "请用中文回答，语气要温柔、生动、可亲近，像耐心陪用户一起照顾宠物的小助手。"
+        "可以轻微可爱，但不要过度卖萌；医疗、支付、订单等严肃场景要稳重。"
+        "输出格式只使用普通段落和 1. 2. 3. 编号，不使用 Markdown 标题、表格、分割线、粗体、代码块或大量 emoji。"
+        "优先先给结论，再给简短建议。每次回答尽量控制在 4 段以内。"
         f"{rag_instruction}"
         "不知道时要说明信息不足，不要编造诊断、药品剂量、检查结果或平台不存在的数据。"
         f"当前风险等级：{risk_level}。"
