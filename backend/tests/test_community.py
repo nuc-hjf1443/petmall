@@ -90,6 +90,8 @@ async def test_admin_report_resolution_state_and_duplicate_guard(test_context, s
     async with session_factory() as db:
         admin = (await db.execute(select(User).where(User.phone == "13930000013"))).scalar_one()
         admin.is_admin = True
+        author = (await db.execute(select(User).where(User.phone == "13930000011"))).scalar_one()
+        author.nickname = "Reported Author"
         await db.commit()
 
     post = await client.post(
@@ -114,6 +116,10 @@ async def test_admin_report_resolution_state_and_duplicate_guard(test_context, s
     assert report_item["action"] is None
     assert report_item["resolution_reason"] is None
     assert report_item["resolved_by"] is None
+    assert report_item["source_area"] == "community_post"
+    assert report_item["target_user_nickname"] == "Reported Author"
+    assert report_item["target_user_phone"] == "13930000011"
+    assert report_item["target_content"] == "unsafe community post"
 
     resolved = await client.post(
         f"/admin/reports/{report_item['id']}/resolve",

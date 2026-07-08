@@ -46,7 +46,7 @@
 					</view>
 
 					<view class="menu-card card">
-						<view v-for="item in menus" :key="item.label" class="menu-item" @click="go(item.path)">
+						<view v-for="item in menus" :key="item.label" class="menu-item" @click="go(item.path, item)">
 							<view class="menu-icon" :style="{ background: item.bg }">{{ item.icon }}</view>
 							<view class="menu-copy">
 								<text class="menu-title">{{ item.label }}</text>
@@ -90,7 +90,7 @@ export default {
 				{ icon: '⌖', label: '地址管理', desc: '管理商城收货地址', bg: '#e9f8ef', path: '/pages/address/index' },
 				{ icon: '店', label: '商家中心', desc: '申请入驻与管理商品', bg: '#fff0e3', path: '/pages/merchant/index' },
 				{ icon: '⚙', label: '资料与安全', desc: '个人偏好与账号密码', bg: '#f5f2ef', path: '/pages/profile/edit' },
-				{ icon: '管', label: '管理后台', desc: '管理员审核与平台治理', bg: '#eef3ff', path: '/pages/admin/login' }
+				{ icon: '管', label: '管理后台', desc: '管理员审核与平台治理', bg: '#eef3ff', path: '/pages/admin/index', adminOnly: true }
 			]
 		}
 	},
@@ -108,9 +108,20 @@ export default {
 	},
 	methods: {
 		money: formatMoney,
-		go(path) {
-			if (!this.loggedIn && path !== '/pages/auth/login' && path !== '/pages/admin/login') {
+		async go(path, item = null) {
+			if (!this.loggedIn && path !== '/pages/auth/login') {
 				return uni.navigateTo({ url: '/pages/auth/login' })
+			}
+			if (item?.adminOnly || path === '/pages/admin/index') {
+				try {
+					const user = this.user?.id ? this.user : await userApi.me()
+					this.user = user || {}
+					if (!this.user.is_admin) {
+						return uni.showToast({ title: '您还不是管理员,拒绝访问!', icon: 'none' })
+					}
+				} catch (e) {
+					return
+				}
 			}
 			uni.navigateTo({ url: path })
 		},
