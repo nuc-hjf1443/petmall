@@ -48,7 +48,7 @@
 					</view>
 					<view v-if="loadingHistory" class="history-empty">正在加载...</view>
 					<view v-else-if="!historySessions.length" class="history-empty">暂无历史导购</view>
-					<view v-else>
+					<view v-else class="history-list">
 						<view
 							v-for="item in historySessions"
 							:key="item.id"
@@ -400,19 +400,20 @@ export default {
 	height: calc(100dvh - var(--header-height));
 	min-height: 0;
 	overflow: hidden;
-	grid-template-columns: 360px minmax(0, 1fr);
+	grid-template-columns: 280px minmax(0, 1fr);
 	background: #fff;
 }
 .guide-sidebar {
-	width: 360px;
-	min-width: 360px;
-	max-width: 360px;
+	display: flex;
+	width: 280px;
+	min-width: 280px;
+	max-width: 280px;
 	min-height: 0;
-	overflow: auto;
-	padding: 24px 22px;
+	overflow: hidden;
+	flex-direction: column;
+	padding: 20px;
 	border-right: 1px solid var(--color-border);
-	background: var(--color-bg);
-	scrollbar-gutter: stable both-edges;
+	background: #fffaf6;
 }
 .assistant-brand {
 	display: flex;
@@ -444,15 +445,15 @@ export default {
 	font-size: 20px;
 }
 .new-chat {
-	height: 42px;
-	margin: 24px 0;
+	height: 38px;
+	margin: 20px 0 16px;
 	padding: 0;
 	border: 1px solid var(--color-primary);
-	border-radius: 21px;
+	border-radius: 19px;
 	background: #fff;
 	color: var(--color-primary);
-	font-size: 13px;
-	line-height: 42px;
+	font-size: 12px;
+	line-height: 38px;
 }
 .summary-card,
 .history-card,
@@ -464,16 +465,25 @@ export default {
 .summary-card,
 .history-card {
 	width: 100%;
-	padding: 16px;
-	border-radius: var(--radius-sm);
+	padding: 14px;
+	border-radius: 8px;
 }
-.history-card { margin-top: 14px; }
+.summary-card { flex: none; }
+.history-card {
+	display: flex;
+	min-height: 0;
+	flex: 1 1 auto;
+	flex-direction: column;
+	margin-top: 12px;
+	overflow: hidden;
+}
 .panel-heading {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 12px;
-	font-size: 13px;
+	gap: 10px;
+	margin-bottom: 10px;
+	font-size: 12px;
 	font-weight: 800;
 }
 .panel-action {
@@ -483,13 +493,13 @@ export default {
 }
 .summary-row {
 	display: grid;
-	grid-template-columns: 22px 52px minmax(0, 1fr);
+	grid-template-columns: 20px 38px minmax(0, 1fr);
 	align-items: center;
-	gap: 6px;
-	margin-top: 8px;
-	padding: 9px 10px;
+	gap: 5px;
+	margin-top: 7px;
+	padding: 8px;
 	border: 1px solid transparent;
-	border-radius: var(--radius-sm);
+	border-radius: 8px;
 	background: #fffaf6;
 	font-size: 11px;
 }
@@ -512,6 +522,7 @@ export default {
 .summary-label {
 	color: var(--color-text);
 	font-weight: 700;
+	white-space: nowrap;
 }
 .summary-value {
 	overflow: hidden;
@@ -536,44 +547,52 @@ export default {
 }
 .summary-input::placeholder { color: #b9ada3; }
 .more-demand-panel {
-	margin-top: 10px;
-	padding: 10px;
+	margin-top: 8px;
+	padding: 9px;
 	border: 1px solid var(--color-border);
-	border-radius: var(--radius-sm);
+	border-radius: 8px;
 	background: #fffaf6;
 }
 .more-demand-panel textarea {
 	width: 100%;
-	min-height: 72px;
+	min-height: 64px;
 	color: var(--color-text);
-	font-size: 12px;
+	font-size: 11px;
 	line-height: 1.6;
 }
 .more-demand {
-	height: 34px;
-	margin: 12px 0 0;
+	height: 32px;
+	margin: 10px 0 0;
 	padding: 0;
 	border: 1px solid var(--color-border);
-	border-radius: var(--radius-sm);
+	border-radius: 8px;
 	background: var(--color-primary-soft);
 	color: var(--color-primary);
 	font-size: 11px;
-	line-height: 34px;
+	line-height: 32px;
 }
 .history-empty {
-	padding: 16px 0;
+	padding: 12px;
+	border: 1px dashed var(--color-border);
+	border-radius: 8px;
+	background: #fff;
 	color: var(--color-text-secondary);
-	text-align: center;
+	text-align: left;
 	font-size: 11px;
+	line-height: 1.6;
+}
+.history-list {
+	min-height: 0;
+	overflow: auto;
 }
 .history-item {
 	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr) 58px 42px;
+	grid-template-columns: 14px minmax(0, 1fr) auto;
 	gap: 6px;
 	align-items: center;
 	margin-top: 8px;
-	padding: 10px;
-	border-radius: var(--radius-sm);
+	padding: 9px;
+	border-radius: 8px;
 	background: #fffaf6;
 	font-size: 10px;
 	cursor: pointer;
@@ -583,6 +602,9 @@ export default {
 .history-clock,
 .history-time { color: var(--color-text-secondary); }
 .history-delete {
+	grid-row: 1 / span 2;
+	grid-column: 3;
+	width: 38px;
 	height: 24px;
 	margin: 0;
 	padding: 0;
@@ -599,7 +621,10 @@ export default {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.history-time { text-align: right; }
+.history-time {
+	grid-column: 2;
+	text-align: left;
+}
 .guide-main {
 	display: flex;
 	height: 100%;

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -48,6 +49,37 @@ MEDICAL_KEYWORDS = (
     "prescription",
 )
 
+DOG_QUERY_KEYWORDS = (
+    "\u67ef\u57fa",
+    "\u91d1\u6bdb",
+    "\u62c9\u5e03\u62c9\u591a",
+    "\u6cf0\u8fea",
+    "\u67f4\u72ac",
+    "\u6bd4\u718a",
+    "\u8fb9\u7267",
+    "\u72d7",
+    "\u72ac",
+    "\u72d7\u7cae",
+    "\u72ac\u7cae",
+    "dog",
+    "puppy",
+)
+CAT_QUERY_KEYWORDS = (
+    "\u5e03\u5076",
+    "\u82f1\u77ed",
+    "\u7f05\u56e0",
+    "\u6a58\u732b",
+    "\u5e7c\u732b",
+    "\u732b",
+    "\u732b\u7cae",
+    "\u732b\u7802",
+    "cat",
+    "kitten",
+)
+
+DOG_PRODUCT_SEARCH_TERMS = ("\u72d7\u7cae", "\u72ac\u7cae", "\u4f4e\u654f", "\u72d7", "\u72ac")
+CAT_PRODUCT_SEARCH_TERMS = ("\u732b\u7cae", "\u732b\u7802", "\u4f4e\u654f", "\u732b", "\u5e7c\u732b")
+
 
 async def create_guide_session(
     db: AsyncSession,
@@ -91,6 +123,44 @@ def assess_guide_risk(content: str) -> str:
     if any(keyword in text for keyword in MEDICAL_KEYWORDS):
         return "medical"
     return "normal"
+
+
+def infer_pet_type_from_guide_query(content: str) -> str | None:
+    text = (content or "").lower()
+    dog_score = sum(1 for keyword in DOG_QUERY_KEYWORDS if keyword.lower() in text)
+    cat_score = sum(1 for keyword in CAT_QUERY_KEYWORDS if keyword.lower() in text)
+    if re.search(r"\bdog\b|\bpuppy\b", text):
+        dog_score += 2
+    if re.search(r"\bcat\b|\bkitten\b", text):
+        cat_score += 2
+    if dog_score > cat_score:
+        return "dog"
+    if cat_score > dog_score:
+        return "cat"
+    return None
+
+
+def _product_matches_pet_type(product: dict[str, Any], pet_type: str | None) -> bool:
+    if not pet_type:
+        return True
+    product_pet_type = str(product.get("applicable_pet_type") or "").strip()
+    return not product_pet_type or product_pet_type == pet_type
+
+
+def _filter_products_by_pet_type(products: list[dict[str, Any]], pet_type: str | None) -> list[dict[str, Any]]:
+    return [product for product in products if _product_matches_pet_type(product, pet_type)]
+
+
+def _guide_product_search_queries(query: str, pet_type: str | None) -> list[str]:
+    queries: list[str] = []
+    if query.strip():
+        queries.append(query.strip())
+    keywords = DOG_PRODUCT_SEARCH_TERMS if pet_type == "dog" else CAT_PRODUCT_SEARCH_TERMS if pet_type == "cat" else ()
+    text = query.lower()
+    for keyword in keywords:
+        if keyword.lower() in text and keyword not in queries:
+            queries.append(keyword)
+    return queries or [""]
 
 
 def _messages_to_history(messages: list[AgentMessage]) -> list[dict[str, str]]:
@@ -185,27 +255,33 @@ async def _search_product_candidates(
     *,
     session_id: int,
     user_id: int,
+    allow_empty_query_fallback: bool = True,
 ) -> list[dict[str, Any]]:
-    try:
-        products = await search_products_for_agent(db, query, pet_type, limit)
-    except Exception as exc:
-        logger.exception(
-            "guide_agent_product_search_failed",
-            extra={
-                "stage": "product_search",
-                "session_id": session_id,
-                "user_id": user_id,
-                "query": query,
-                "pet_type": pet_type,
-                "exception_type": type(exc).__name__,
-                "error": str(exc),
-            },
-        )
+    for search_query in _guide_product_search_queries(query, pet_type):
+        try:
+            products = await search_products_for_agent(db, search_query, pet_type, limit)
+        except Exception as exc:
+            logger.exception(
+                "guide_agent_product_search_failed",
+                extra={
+                    "stage": "product_search",
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "query": search_query,
+                    "pet_type": pet_type,
+                    "exception_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            return []
+        products = _filter_products_by_pet_type(products, pet_type)
+        if products:
+            return products
+    if not allow_empty_query_fallback:
         return []
-    if products:
-        return products
     try:
-        return await search_products_for_agent(db, "", pet_type, limit)
+        products = await search_products_for_agent(db, "", pet_type, limit)
+        return _filter_products_by_pet_type(products, pet_type)
     except Exception as exc:
         logger.exception(
             "guide_agent_product_search_fallback_failed",
@@ -392,7 +468,8 @@ async def send_guide_message(
     if session.pet_id is not None:
         pet_summary = await get_pet_detail_summary(db, user.id, session.pet_id)
 
-    pet_type = pet_summary.get("pet_type") if pet_summary else None
+    requested_pet_type = infer_pet_type_from_guide_query(content)
+    pet_type = requested_pet_type or (pet_summary.get("pet_type") if pet_summary else None)
     products = await _search_product_candidates(
         db,
         content,
@@ -400,6 +477,7 @@ async def send_guide_message(
         limit,
         session_id=session_id,
         user_id=user.id,
+        allow_empty_query_fallback=requested_pet_type is None,
     )
     rag_context, rag_references = await _retrieve_rag_context(db, user.id, session_id, content)
     history_summary, recent_history = await _build_guide_history_context(session)
