@@ -181,6 +181,11 @@ async def test_guide_agent_recommends_real_products_and_persists_result(
     body = response.json()
     assert body["assistant_message"]["risk_level"] == "normal"
     assert body["assistant_message"]["references"] is not None
+    assistant_content = body["assistant_message"]["content"]
+    assert "product_id" not in assistant_content
+    assert "sku_id" not in assistant_content
+    assert "price=" not in assistant_content
+    assert "stock=" not in assistant_content
     assert len(body["recommendations"]) == 1
     recommendation = body["recommendations"][0]
     assert recommendation["product_id"] == ids["product_id"]
@@ -266,6 +271,10 @@ async def test_guide_agent_filters_fabricated_llm_product_ids(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["recommendations"] == []
+    assistant_content = body["assistant_message"]["content"]
+    assert "product_id" not in assistant_content
+    assert "sku_id" not in assistant_content
+    assert "完全匹配" in assistant_content or "补充" in assistant_content
 
     async with session_factory() as session:
         result = await session.execute(select(AgentRecommendation))
@@ -287,7 +296,7 @@ async def test_guide_agent_deduplicates_repeated_llm_product_ids(
 
     async def repeated_workflow(**kwargs):
         return {
-            "answer": "重复推荐同一个商品。",
+            "answer": f"推荐 product_id={ids['product_id']}, sku_id={ids['sku_id']}, price=1299, stock=8。",
             "recommendations": [
                 {"product_id": ids["product_id"], "rank": 1, "reason": "first", "source": "llm"},
                 {"product_id": ids["product_id"], "rank": 2, "reason": "duplicate", "source": "llm"},
@@ -321,6 +330,12 @@ async def test_guide_agent_deduplicates_repeated_llm_product_ids(
     body = response.json()
     assert len(body["recommendations"]) == 1
     assert body["recommendations"][0]["product_id"] == ids["product_id"]
+    assistant_content = body["assistant_message"]["content"]
+    assert "product_id" not in assistant_content
+    assert "sku_id" not in assistant_content
+    assert "price=" not in assistant_content
+    assert "stock=" not in assistant_content
+    assert "商品卡片" in assistant_content
 
     async with session_factory() as session:
         result = await session.execute(select(AgentRecommendation))

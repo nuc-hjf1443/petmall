@@ -7,7 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.agent_workflow import build_rule_based_guide_history_summary, run_guide_agent_workflow, summarize_guide_history
+from core.agent_workflow import (
+    build_rule_based_guide_answer,
+    build_rule_based_guide_history_summary,
+    run_guide_agent_workflow,
+    summarize_guide_history,
+)
 from core.errors import not_found
 from core.rag_service import retrieve_private_knowledge
 from models.agent import AgentMessage, AgentRecommendation, AgentSession
@@ -96,6 +101,10 @@ PRODUCT_INTENT_TERMS = (
     "\u8425\u517b",
 )
 GUIDE_STATE_VERSION = 1
+RAW_PRODUCT_FIELD_PATTERN = re.compile(
+    r"\b(product_id|sku_id|price|stock)\s*=|product_id|sku_id|价格\s*\d|库存\s*\d",
+    re.IGNORECASE,
+)
 
 
 async def create_guide_session(
@@ -360,6 +369,23 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _answer_contains_raw_product_fields(answer: str) -> bool:
+    return bool(RAW_PRODUCT_FIELD_PATTERN.search(answer or ""))
+
+
+def _normalize_guide_answer_for_cards(
+    answer: str | None,
+    *,
+    risk_level: str,
+    products: list[dict[str, Any]],
+    pet_summary: dict[str, Any] | None,
+) -> str:
+    text = str(answer or "").strip()
+    if not text or _answer_contains_raw_product_fields(text):
+        return build_rule_based_guide_answer(risk_level, products, pet_summary)
+    return text
 
 
 async def _build_guide_history_context(
@@ -676,6 +702,15 @@ async def send_guide_message(
         limit,
     )
     hydrated = await _hydrate_recommendations(db, picked, session_id=session_id, user_id=user.id)
+    if not requires_user_confirmation and workflow_result.get("recommendations") and not hydrated:
+        assistant_answer = build_rule_based_guide_answer(risk_level, [], pet_summary)
+    else:
+        assistant_answer = _normalize_guide_answer_for_cards(
+            workflow_result.get("answer"),
+            risk_level=risk_level,
+            products=products,
+            pet_summary=pet_summary,
+        )
 
     user_message = AgentMessage(
         session_id=session_id,
@@ -686,7 +721,7 @@ async def send_guide_message(
     assistant_message = AgentMessage(
         session_id=session_id,
         role="assistant",
-        content=workflow_result["answer"],
+        content=assistant_answer,
         risk_level=risk_level,
         references=rag_references or workflow_result.get("references"),
     )
