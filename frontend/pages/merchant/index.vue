@@ -184,6 +184,18 @@
 									{{ item.label }}
 								</view>
 							</view>
+							<view class="product-search">
+								<text>⌕</text>
+								<input
+									v-model="productKeyword"
+									placeholder="搜索商品名称、品牌或描述"
+									confirm-type="search"
+									maxlength="100"
+									@input="onProductKeywordInput"
+									@confirm="searchProducts"
+								/>
+								<button v-if="productKeyword" class="secondary-button mini" @click="clearProductKeyword">清空</button>
+							</view>
 							<view class="table">
 								<view class="table-row table-head">
 									<text>商品</text>
@@ -308,6 +320,8 @@
 import AppShell from '../../components/AppShell.vue'
 import { merchantApi, supportApi } from '../../api'
 
+const PRODUCT_CHANGE_STORAGE_KEY = 'merchantProductChange'
+
 export default {
 	components: { AppShell },
 	data() {
@@ -320,9 +334,12 @@ export default {
 			productTotal: 0,
 			productLoading: false,
 			productLoadingMore: false,
+			productKeyword: '',
+			productSearchTimer: null,
 			supportConversations: [],
 			loading: true,
 			saving: false,
+			initialized: false,
 			activeTab: 'home',
 			productFilter: 'all',
 			orderFilter: 'all',
@@ -444,10 +461,18 @@ export default {
 		}
 	},
 	onShow() {
-		this.load()
+		const change = this.consumeProductChange()
+		if (!this.initialized) {
+			this.load()
+			return
+		}
+		if (change) this.handleProductChange(change)
 	},
 	onReachBottom() {
 		if (this.activeTab === 'products') this.loadMoreProducts()
+	},
+	onUnload() {
+		if (this.productSearchTimer) clearTimeout(this.productSearchTimer)
 	},
 	methods: {
 		async load() {
@@ -475,6 +500,7 @@ export default {
 				if (result[2].status === 'fulfilled') this.supportConversations = result[2].value?.items || []
 			}
 			this.loading = false
+			this.initialized = true
 		},
 		setActiveTab(tab) {
 			this.activeTab = tab
@@ -488,10 +514,12 @@ export default {
 			await this.loadProducts(true)
 		},
 		productQueryParams(page) {
+			const keyword = this.productKeyword.trim()
 			return {
 				page,
 				page_size: this.productPageSize,
-				status: this.productFilter === 'all' ? undefined : this.productFilter
+				status: this.productFilter === 'all' ? undefined : this.productFilter,
+				keyword: keyword || undefined
 			}
 		},
 		applyProductPage(result, reset = false) {
@@ -517,6 +545,24 @@ export default {
 		},
 		loadMoreProducts() {
 			return this.loadProducts(false)
+		},
+		onProductKeywordInput() {
+			if (this.productSearchTimer) clearTimeout(this.productSearchTimer)
+			this.productSearchTimer = setTimeout(() => {
+				this.loadProducts(true)
+			}, 300)
+		},
+		searchProducts() {
+			if (this.productSearchTimer) {
+				clearTimeout(this.productSearchTimer)
+				this.productSearchTimer = null
+			}
+			return this.loadProducts(true)
+		},
+		clearProductKeyword() {
+			if (!this.productKeyword) return
+			this.productKeyword = ''
+			return this.searchProducts()
 		},
 		async loadSupport() {
 			const result = await supportApi.merchantList({ status: this.supportFilter, page: 1, page_size: 100 })
@@ -589,6 +635,56 @@ export default {
 			}
 			return map[status] || '暂无备注'
 		},
+		productMatchesCurrentView(product) {
+			if (this.productFilter !== 'all' && product.status !== this.productFilter) return false
+			const keyword = this.productKeyword.trim().toLowerCase()
+			if (!keyword) return true
+			return [product.title, product.brand, product.description]
+				.some(value => String(value || '').toLowerCase().includes(keyword))
+		},
+		upsertProductRow(product) {
+			const index = this.products.findIndex(item => item.id === product.id)
+			if (!this.productMatchesCurrentView(product)) {
+				if (index !== -1) {
+					this.products.splice(index, 1)
+					this.productTotal = Math.max(this.productTotal - 1, 0)
+				}
+				return
+			}
+			if (index === -1) {
+				this.products.unshift(product)
+				this.productTotal += 1
+				return
+			}
+			this.products.splice(index, 1, { ...this.products[index], ...product })
+		},
+		applyProductPatch(id, patch) {
+			const current = this.products.find(item => item.id === id)
+			if (!current) return
+			this.upsertProductRow({ ...current, ...patch })
+		},
+		async refreshProductRow(id, fallback = {}) {
+			try {
+				const response = await merchantApi.product(id)
+				if (response?.product) {
+					this.upsertProductRow({ ...fallback, ...response.product })
+					return
+				}
+			} catch (error) {}
+			if (Object.keys(fallback).length) this.applyProductPatch(id, fallback)
+		},
+		consumeProductChange() {
+			try {
+				const change = uni.getStorageSync(PRODUCT_CHANGE_STORAGE_KEY)
+				if (change) uni.removeStorageSync(PRODUCT_CHANGE_STORAGE_KEY)
+				return change?.id ? change : null
+			} catch (error) {
+				return null
+			}
+		},
+		handleProductChange(change) {
+			return this.refreshProductRow(change.id)
+		},
 		newProduct() {
 			uni.navigateTo({ url: '/pages/merchant/product-edit' })
 		},
@@ -597,23 +693,23 @@ export default {
 		},
 		async submit(id) {
 			try {
-				await merchantApi.submitProduct(id, {})
+				const result = await merchantApi.submitProduct(id, {})
 				uni.showToast({ title: '商品已提交审核' })
-				this.loadProducts(true)
+				this.applyProductPatch(id, { status: result.status, audit_reason: null })
 			} catch (error) {}
 		},
 		async onSale(id) {
 			try {
-				await merchantApi.putProductOnSale(id, {})
+				const result = await merchantApi.putProductOnSale(id, {})
 				uni.showToast({ title: '商品已上架' })
-				this.loadProducts(true)
+				this.applyProductPatch(id, { status: result.status })
 			} catch (error) {}
 		},
 		async offSale(id) {
 			try {
-				await merchantApi.takeProductOffSale(id, {})
+				const result = await merchantApi.takeProductOffSale(id, {})
 				uni.showToast({ title: '商品已下架' })
-				this.loadProducts(true)
+				this.applyProductPatch(id, { status: result.status })
 			} catch (error) {}
 		},
 		discount(id) {
@@ -624,9 +720,9 @@ export default {
 				success: async result => {
 					if (!result.confirm) return
 					try {
-						await merchantApi.setProductDiscount(id, { sku_prices: JSON.parse(result.content) })
+						const response = await merchantApi.setProductDiscount(id, { sku_prices: JSON.parse(result.content) })
 						uni.showToast({ title: '价格已更新' })
-						this.loadProducts(true)
+						await this.refreshProductRow(id, { status: response.status })
 					} catch (error) {
 						if (error instanceof SyntaxError) {
 							uni.showToast({ title: 'JSON 格式错误', icon: 'none' })
@@ -836,6 +932,18 @@ export default {
 	cursor: pointer;
 }
 .tab.active { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-primary); font-weight: 800; }
+.product-search {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 14px;
+	padding: 9px 12px;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	background: #fff;
+}
+.product-search > text { color: var(--color-text-secondary); font-size: 14px; }
+.product-search input { min-width: 0; flex: 1; font-size: 13px; }
 .table { overflow-x: auto; }
 .table-row {
 	display: grid;

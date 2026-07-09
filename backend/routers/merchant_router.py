@@ -103,6 +103,7 @@ async def merchant_products(
         str | None,
         Query(pattern="^(draft|pending|on_sale|off_shelf|rejected)$"),
     ] = None,
+    keyword: Annotated[str | None, Query(max_length=100)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     current_user: User = Depends(get_current_user),
@@ -112,6 +113,7 @@ async def merchant_products(
         db,
         current_user.id,
         status=status,
+        keyword=keyword,
         page=page,
         page_size=page_size,
     )
