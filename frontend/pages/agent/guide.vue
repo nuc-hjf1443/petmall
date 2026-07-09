@@ -90,9 +90,28 @@
 							<view v-for="item in suggestions" :key="item" @click="ask(item)">{{ item }}</view>
 						</view>
 					</view>
-					<view v-for="(msg,index) in messages" :id="`guide-msg-${index}`" :key="index" class="message-row" :class="msg.role">
-						<view class="message-avatar">{{ msg.role === 'user' ? '我' : '荐' }}</view>
-						<view class="bubble"><text>{{ displayMessageContent(msg) }}</text></view>
+					<view v-for="(msg,index) in messages" :id="`guide-msg-${index}`" :key="index" class="message-block">
+						<view class="message-row" :class="msg.role">
+							<view class="message-avatar">{{ msg.role === 'user' ? '我' : '荐' }}</view>
+							<view class="bubble"><text>{{ displayMessageContent(msg) }}</text></view>
+						</view>
+						<view v-if="messageRecommendations(msg).length" class="recommendations message-recommendations">
+							<text class="recommend-intro">下面是根据这次需求筛出的真实在售商品，价格、库存和规格以卡片为准。</text>
+							<view class="product-grid">
+								<view v-for="item in messageRecommendations(msg)" :key="item.product_id" class="product-card">
+									<image class="product-image" :src="productImage(item.product)" mode="aspectFit" />
+									<text class="product-title">{{ item.product.title }}</text>
+									<view class="product-tags">
+										<text v-for="tag in recommendTags(item)" :key="tag">{{ tag }}</text>
+									</view>
+									<text class="product-price">￥{{ formatPrice(item.product.price) }}</text>
+									<text class="product-stock">{{ productStockText(item.product) }}</text>
+									<text class="product-reason">推荐理由：{{ item.reason }}</text>
+									<text v-if="item.caution" class="product-caution">{{ item.caution }}</text>
+									<button class="detail-btn" @click="detail(item.product_id)">查看详情</button>
+								</view>
+							</view>
+						</view>
 					</view>
 					<view v-if="nextQuestions.length" class="question-panel">
 						<view v-for="question in nextQuestions" :key="question.key" class="question-item">
@@ -104,22 +123,6 @@
 									:disabled="sending"
 									@click="answerGuideOption(option)"
 								>{{ option.label }}</button>
-							</view>
-						</view>
-					</view>
-					<view v-if="recommendations.length" class="recommendations">
-						<text class="recommend-intro">根据你的需求，我筛选了以下真实在售商品，兼顾适配度、价格和库存。</text>
-						<view class="product-grid">
-							<view v-for="item in recommendations" :key="item.product_id" class="product-card">
-								<image class="product-image" :src="productImage(item.product)" mode="aspectFit" />
-								<text class="product-title">{{ item.product.title }}</text>
-								<view class="product-tags">
-									<text v-for="tag in recommendTags(item)" :key="tag">{{ tag }}</text>
-								</view>
-								<text class="product-price">￥{{ formatPrice(item.product.price) }}</text>
-								<text class="product-reason">推荐理由：{{ item.reason }}</text>
-								<text v-if="item.caution" class="product-caution">{{ item.caution }}</text>
-								<button class="detail-btn" @click="detail(item.product_id)">查看详情</button>
 							</view>
 						</view>
 					</view>
@@ -303,8 +306,11 @@ export default {
 					this.sessionId = (await aiApi.createGuideSession(payload)).id
 				}
 				const response = await aiApi.sendGuideMessage(this.sessionId, { content: guideContent, limit: 5 })
-				this.messages.push(response.assistant_message)
 				this.recommendations = response.recommendations || []
+				this.messages.push({
+					...response.assistant_message,
+					recommendations: this.recommendations
+				})
 				this.guideState = response.guide_state || null
 				this.nextQuestions = response.next_questions || []
 				this.requiresUserConfirmation = !!response.requires_user_confirmation
@@ -334,10 +340,11 @@ export default {
 			try {
 				const session = await aiApi.session(item.id)
 				this.sessionId = session.id
-				this.messages = (session.messages || []).slice().sort((a, b) => a.id - b.id)
-				const latestUserMessage = this.messages.filter(message => message.role === 'user').slice(-1)[0]
+				const messages = (session.messages || []).slice().sort((a, b) => a.id - b.id)
+				const latestUserMessage = messages.filter(message => message.role === 'user').slice(-1)[0]
 				this.demandSummary = latestUserMessage ? this.parseDemand(latestUserMessage.content) : this.emptySummary()
 				this.recommendations = await aiApi.guideRecommendations(session.id)
+				this.messages = this.attachRecommendationsToLatestAssistant(messages, this.recommendations)
 				this.guideState = null
 				this.nextQuestions = []
 				this.requiresUserConfirmation = false
@@ -377,6 +384,17 @@ export default {
 			if (message.role !== 'user') return message.content
 			const match = String(message.content || '').match(/^用户问题：(.+?)(?:\n左侧需求摘要：|$)/s)
 			return match ? match[1].trim() : message.content
+		},
+		attachRecommendationsToLatestAssistant(messages, recommendations = []) {
+			const nextMessages = messages.map(message => ({ ...message }))
+			const latestAssistantIndex = nextMessages.map(message => message.role).lastIndexOf('assistant')
+			if (latestAssistantIndex >= 0 && recommendations.length) {
+				nextMessages[latestAssistantIndex].recommendations = recommendations
+			}
+			return nextMessages
+		},
+		messageRecommendations(message) {
+			return Array.isArray(message.recommendations) ? message.recommendations : []
 		},
 		detail(id) {
 			uni.navigateTo({ url: `/pages/mall/detail?id=${id}` })
@@ -482,6 +500,10 @@ export default {
 		formatPrice(price) {
 			const value = Number(price || 0) / 100
 			return Number.isInteger(value) ? String(value) : value.toFixed(2)
+		},
+		productStockText(product = {}) {
+			const stock = Number(product.stock || 0)
+			return stock > 0 ? `库存充足 · ${stock} 件` : '库存以详情页为准'
 		},
 		productImage(product = {}) {
 			const primary = (product.images || []).find(image => image.is_primary)
@@ -845,6 +867,10 @@ export default {
 	background: #fff;
 	font-size: 11px;
 }
+.message-block {
+	max-width: 980px;
+	margin: 0 auto;
+}
 .message-row {
 	display: flex;
 	max-width: 880px;
@@ -913,6 +939,10 @@ export default {
 	max-width: 980px;
 	margin: 8px auto 24px;
 }
+.message-recommendations {
+	margin-top: -4px;
+	padding-left: 44px;
+}
 .recommend-intro {
 	display: block;
 	margin-bottom: 10px;
@@ -966,6 +996,11 @@ export default {
 	color: var(--color-primary);
 	font-size: 18px;
 	font-weight: 900;
+}
+.product-stock {
+	margin-top: 3px;
+	color: var(--color-text-secondary);
+	font-size: 10px;
 }
 .product-reason {
 	display: -webkit-box;
@@ -1060,6 +1095,7 @@ export default {
 		max-width: 82%;
 		font-size: 12px;
 	}
+	.message-recommendations { padding-left: 0; }
 	.product-grid { grid-template-columns: 1fr; }
 	.product-card { min-height: auto; }
 	.composer {

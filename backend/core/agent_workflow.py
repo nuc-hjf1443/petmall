@@ -479,7 +479,7 @@ def _build_guide_recommendations(
                 "product_id": int(product["id"]),
                 "sku_id": int(sku["id"]),
                 "rank": len(recommendations) + 1,
-                "reason": "匹配当前宠物档案和本次导购需求。",
+                "reason": _build_guide_recommendation_reason(product, matched_pet_fields),
                 "caution": "下单前请确认规格、成分和适用对象；换粮时建议逐步过渡。",
                 "source": source,
                 "source_detail": "rag_enhanced" if rag_context else "rule_based_ranked",
@@ -488,6 +488,22 @@ def _build_guide_recommendations(
             }
         )
     return recommendations
+
+
+def _build_guide_recommendation_reason(product: dict[str, Any], matched_pet_fields: list[str]) -> str:
+    points = []
+    if "pet_type" in matched_pet_fields:
+        points.append("适配当前宠物类型")
+    elif product.get("applicable_pet_type"):
+        points.append("适用对象明确")
+    else:
+        points.append("匹配本次导购关键词")
+    if any(field in matched_pet_fields for field in ("allergy_notes", "diet_preference", "product_preference")):
+        points.append("和宠物档案里的偏好或注意事项有关")
+    else:
+        points.append("可作为本次需求的候选款")
+    points.append("卡片中可直接核对价格、库存和规格")
+    return "；".join(points[:3]) + "。"
 
 
 def _matched_pet_fields(product: dict[str, Any], pet_summary: dict[str, Any] | None) -> list[str]:
@@ -611,10 +627,11 @@ async def _call_deepseek_guide(
         return None
 
     system_prompt = (
-        "You are a pet mall shopping guide. Answer in concise Chinese. "
+        "You are a warm but concise pet mall shopping guide. Answer in Chinese with 2-4 short sentences. "
         "Only recommend products from the provided candidate list. "
         "Do not invent product IDs, SKUs, prices, stock, promotions, brands, or medical conclusions. "
-        "Prices and stock are database facts. "
+        "Do not show raw product_id, sku_id, price, or stock values in the chat answer; product facts are rendered by cards. "
+        "First summarize why these products fit, then tell the user to check the product cards for price, stock, and specs. "
         "For medical, medication, prescription diet, or emergency questions, add a veterinarian safety warning."
     )
     user_prompt = (
@@ -649,15 +666,18 @@ def build_rule_based_guide_answer(
     pet_summary: dict[str, Any] | None,
 ) -> str:
     if not products:
-        answer = "暂时没有匹配到可售商品。你可以补充宠物类型、年龄、预算或换一个品类再试。"
+        answer = "我暂时没有找到完全匹配的在售商品。你可以换一个品类，或者补充宠物类型、预算、口味/材质偏好后再试。"
     else:
         pet_part = ""
         if pet_summary:
             pet_name = pet_summary.get("name")
             pet_type = pet_summary.get("pet_type")
-            pet_part = f"，结合{pet_name or '所选宠物'}（{pet_type or '宠物'}）的档案"
+            pet_part = f"，也参考了{pet_name or '所选宠物'}（{pet_type or '宠物'}）的档案"
         titles = ", ".join(str(product.get("title")) for product in products[:3] if product.get("title"))
-        answer = f"我从当前在售商品中{pet_part}为你筛选了这些候选商品：{titles}。推荐结果会以商品卡片为准，价格和库存以商城数据为准。"
+        answer = (
+            f"我先从当前真实在售商品里{pet_part}筛了一轮，下面这些更贴近本次需求：{titles}。"
+            "你可以重点看商品卡片里的价格、库存和规格；如果有过敏或肠胃敏感，下单前再核对一下配方。"
+        )
     if risk_level == "high":
         return f"{answer}\n\n{GUIDE_HIGH_RISK_TEXT} {GUIDE_MEDICAL_SAFETY_TEXT}"
     if risk_level == "medical":
