@@ -29,6 +29,7 @@ async def list_merchant_products(
     user_id: int,
     *,
     status: str | None = None,
+    keyword: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -39,6 +40,7 @@ async def list_merchant_products(
         db,
         merchant.id,
         status=status,
+        keyword=keyword,
         page=page,
         page_size=page_size,
     )
@@ -52,6 +54,7 @@ async def list_merchant_products(
                 "category_id": product.category_id,
                 "brand": product.brand,
                 "title": product.title,
+                "description": product.description,
                 "cover_image": product.cover_image,
                 "price": product.price,
                 "original_price": product.original_price,

@@ -437,6 +437,7 @@ async def get_products_for_merchant(
     merchant_id: int,
     *,
     status: str | None = None,
+    keyword: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[Product], int]:
@@ -446,6 +447,7 @@ async def get_products_for_merchant(
         db,
         merchant_id,
         status=status,
+        keyword=keyword,
         offset=(safe_page - 1) * safe_page_size,
         limit=safe_page_size,
     )

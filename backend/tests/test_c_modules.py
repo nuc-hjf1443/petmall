@@ -119,6 +119,7 @@ async def test_merchant_apply_and_admin_approve_sets_user_merchant(test_context,
 
     await register_user(client, cache, "13800138103", strong_password)
     merchant_token = await login_user(client, "13800138103", strong_password)
+    other_user = await register_user(client, cache, "13800138113", strong_password)
     await create_admin(session_factory, strong_password)
     admin_token = await login_user(client, "13800138999", strong_password)
 
@@ -204,8 +205,32 @@ async def test_merchant_apply_and_admin_approve_sets_user_merchant(test_context,
                 merchant_id=merchant_id,
                 category_id=category_id,
                 title="Sang Dog Toy",
+                brand="TailBrand",
+                description="Durable chew toy for coat health keyword checks",
                 price=500,
                 stock=2,
+                status=ProductStatus.ON_SALE.value,
+            )
+        )
+        other_merchant = Merchant(
+            owner_user_id=other_user["id"],
+            shop_name="Other Pet Shop",
+            contact_name="Other",
+            contact_phone="13800138113",
+            business_scope="pet food",
+            status="approved",
+        )
+        session.add(other_merchant)
+        await session.flush()
+        session.add(
+            Product(
+                merchant_id=other_merchant.id,
+                category_id=category_id,
+                title="TailBrand Other Merchant Product",
+                brand="TailBrand",
+                description="Should not appear in this merchant search",
+                price=800,
+                stock=8,
                 status=ProductStatus.ON_SALE.value,
             )
         )
@@ -230,6 +255,33 @@ async def test_merchant_apply_and_admin_approve_sets_user_merchant(test_context,
     assert sale_page.status_code == 200, sale_page.text
     assert sale_page.json()["total"] == 1
     assert sale_page.json()["items"][0]["status"] == ProductStatus.ON_SALE.value
+
+    title_search = await client.get(
+        "/merchants/me/products",
+        headers=auth_headers(merchant_token),
+        params={"keyword": "Cat Food"},
+    )
+    assert title_search.status_code == 200, title_search.text
+    assert title_search.json()["total"] == 1
+    assert title_search.json()["items"][0]["title"] == "Sang Cat Food"
+
+    brand_search = await client.get(
+        "/merchants/me/products",
+        headers=auth_headers(merchant_token),
+        params={"keyword": "TailBrand", "status": ProductStatus.ON_SALE.value},
+    )
+    assert brand_search.status_code == 200, brand_search.text
+    assert brand_search.json()["total"] == 1
+    assert brand_search.json()["items"][0]["title"] == "Sang Dog Toy"
+
+    description_search = await client.get(
+        "/merchants/me/products",
+        headers=auth_headers(merchant_token),
+        params={"keyword": "coat health"},
+    )
+    assert description_search.status_code == 200, description_search.text
+    assert description_search.json()["total"] == 1
+    assert description_search.json()["items"][0]["title"] == "Sang Dog Toy"
 
     submitted = await client.post(
         f"/merchants/me/products/{product_id}/submit",

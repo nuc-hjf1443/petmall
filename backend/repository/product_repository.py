@@ -147,12 +147,23 @@ async def list_products_by_merchant(
     merchant_id: int,
     *,
     status: str | None = None,
+    keyword: str | None = None,
     offset: int = 0,
     limit: int = 100,
 ) -> tuple[list[Product], int]:
     filters = [Product.merchant_id == merchant_id]
     if status:
         filters.append(Product.status == status)
+    clean_keyword = keyword.strip() if keyword else ""
+    if clean_keyword:
+        pattern = f"%{clean_keyword}%"
+        filters.append(
+            or_(
+                Product.title.ilike(pattern),
+                Product.brand.ilike(pattern),
+                Product.description.ilike(pattern),
+            )
+        )
     total = int((await db.scalar(select(func.count(Product.id)).where(*filters))) or 0)
     result = await db.execute(
         select(Product)

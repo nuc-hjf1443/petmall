@@ -402,18 +402,28 @@ export default {
 					brand: this.form.brand || null,
 					applicable_pet_type: this.form.applicable_pet_type || null
 				}
+				let savedProduct = null
 				if (this.id) {
 					const updatePayload = { ...payloadForm }
 					if (this.imageUrl) {
 						updatePayload.images = [{ image_url: this.imageUrl, is_primary: true, sort_order: 0 }]
 					}
-					await merchantApi.updateProduct(this.id, updatePayload)
+					const response = await merchantApi.updateProduct(this.id, updatePayload)
+					savedProduct = response?.product
 				} else {
-					await merchantApi.createProduct({
+					const response = await merchantApi.createProduct({
 						...payloadForm,
 						category_id: this.categoryId,
 						skus: [{ ...this.sku, price, stock: Number(this.sku.stock) }],
 						images: [{ image_url: this.imageUrl, is_primary: true, sort_order: 0 }]
+					})
+					savedProduct = response?.product
+				}
+				if (savedProduct?.id) {
+					uni.setStorageSync('merchantProductChange', {
+						id: savedProduct.id,
+						type: this.id ? 'updated' : 'created',
+						at: Date.now()
 					})
 				}
 				uni.showToast({ title: '商品已保存' })
