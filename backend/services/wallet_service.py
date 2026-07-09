@@ -215,12 +215,20 @@ async def get_my_withdrawals(db: AsyncSession, user_id: int):
     return await list_user_withdrawals(db, user_id)
 
 
-async def get_admin_withdrawals(db: AsyncSession, *, page: int, page_size: int, status: str | None):
+async def get_admin_withdrawals(
+    db: AsyncSession,
+    *,
+    page: int,
+    page_size: int,
+    status: str | None,
+    keyword: str | None = None,
+):
     items, total, page, page_size = await list_admin_withdrawals(
         db,
         page=page,
         page_size=page_size,
         status=status,
+        keyword=keyword,
     )
     return AdminWithdrawalListResponse(items=items, total=total, page=page, page_size=page_size)
 

@@ -12,6 +12,10 @@ from models.product import (
 from models.order import Order, OrderItem, OrderStatus
 
 
+KNOWN_PET_TYPE_FILTERS = ["猫", "狗", "猫犬通用", "猫狗通用", "小宠", "水族", "cat", "dog"]
+KNOWN_BRAND_FILTERS = ["皇家", "Royal", "伯纳天纯", "麦富迪", "网易严选", "pidan", "卫仕"]
+
+
 async def list_enabled_categories(db: AsyncSession) -> list[ProductCategory]:
     result = await db.execute(
         select(ProductCategory)
@@ -42,18 +46,40 @@ async def list_public_products(
         pattern = f"%{keyword.strip()}%"
         filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
     if brand_keyword:
-        pattern = f"%{brand_keyword.strip()}%"
-        filters.append(
-            or_(
-                Product.brand.ilike(pattern),
-                Product.title.ilike(pattern),
-                Product.description.ilike(pattern),
+        clean_brand_keyword = brand_keyword.strip()
+        if clean_brand_keyword == "其他":
+            known_brands = [item.lower() for item in KNOWN_BRAND_FILTERS]
+            filters.append(
+                or_(
+                    Product.brand.is_(None),
+                    Product.brand == "",
+                    func.lower(Product.brand).notin_(known_brands),
+                )
             )
-        )
+        else:
+            pattern = f"%{clean_brand_keyword}%"
+            filters.append(
+                or_(
+                    Product.brand.ilike(pattern),
+                    Product.title.ilike(pattern),
+                    Product.description.ilike(pattern),
+                )
+            )
     if category_ids is not None:
         filters.append(Product.category_id.in_(category_ids))
     if pet_type:
-        filters.append(Product.applicable_pet_type == pet_type.strip())
+        clean_pet_type = pet_type.strip()
+        if clean_pet_type == "其他":
+            known_pet_types = [item.lower() for item in KNOWN_PET_TYPE_FILTERS]
+            filters.append(
+                or_(
+                    Product.applicable_pet_type.is_(None),
+                    Product.applicable_pet_type == "",
+                    func.lower(Product.applicable_pet_type).notin_(known_pet_types),
+                )
+            )
+        else:
+            filters.append(Product.applicable_pet_type == clean_pet_type)
     if min_price is not None:
         filters.append(Product.price >= min_price)
     if max_price is not None:
@@ -181,9 +207,21 @@ async def list_products_by_status(
     *,
     page: int,
     page_size: int,
+    keyword: str | None = None,
 ) -> tuple[list[Product], int]:
+    filters = [Product.status == status]
+    clean_keyword = keyword.strip() if keyword else ""
+    if clean_keyword:
+        pattern = f"%{clean_keyword}%"
+        filters.append(
+            or_(
+                Product.title.ilike(pattern),
+                Product.brand.ilike(pattern),
+                Product.description.ilike(pattern),
+            )
+        )
     total = int(
-        (await db.scalar(select(func.count(Product.id)).where(Product.status == status))) or 0
+        (await db.scalar(select(func.count(Product.id)).where(*filters))) or 0
     )
     result = await db.execute(
         select(Product)
@@ -192,7 +230,7 @@ async def list_products_by_status(
             selectinload(Product.skus),
             selectinload(Product.images),
         )
-        .where(Product.status == status)
+        .where(*filters)
         .order_by(Product.submitted_at, Product.id)
         .offset((page - 1) * page_size)
         .limit(page_size)

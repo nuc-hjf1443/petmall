@@ -3,8 +3,9 @@ from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from core.errors import bad_request, conflict, forbidden, not_found
 from models.community import Follow, Post, PostComment, PostFavorite, PostLike, PostMedia, PostStatus, Report
@@ -289,10 +290,58 @@ async def create_report(db: AsyncSession, user_id: int, post_id: int, payload: R
         await db.commit()
 
 
-async def list_reports(db: AsyncSession, page: int, page_size: int) -> PageResult:
-    total = int((await db.scalar(select(func.count(Report.id)))) or 0)
+async def list_reports(
+    db: AsyncSession,
+    page: int,
+    page_size: int,
+    *,
+    status: str | None = None,
+    keyword: str | None = None,
+) -> PageResult:
+    filters = []
+    if status:
+        filters.append(Report.status == status)
+    post_user = aliased(User)
+    comment_user = aliased(User)
+    clean_keyword = keyword.strip() if keyword else ""
+    if clean_keyword:
+        pattern = f"%{clean_keyword}%"
+        filters.append(
+            or_(
+                Report.reason.ilike(pattern),
+                Post.content.ilike(pattern),
+                PostComment.content.ilike(pattern),
+                post_user.phone.ilike(pattern),
+                post_user.nickname.ilike(pattern),
+                comment_user.phone.ilike(pattern),
+                comment_user.nickname.ilike(pattern),
+            )
+        )
+
+    base_statement = (
+        select(Report)
+        .outerjoin(Post, and_(Report.target_type == "post", Post.id == Report.target_id))
+        .outerjoin(PostComment, and_(Report.target_type == "comment", PostComment.id == Report.target_id))
+        .outerjoin(post_user, post_user.id == Post.user_id)
+        .outerjoin(comment_user, comment_user.id == PostComment.user_id)
+        .where(*filters)
+    )
+    total = int(
+        (
+            await db.scalar(
+                select(func.count(Report.id))
+                .select_from(Report)
+                .outerjoin(Post, and_(Report.target_type == "post", Post.id == Report.target_id))
+                .outerjoin(PostComment, and_(Report.target_type == "comment", PostComment.id == Report.target_id))
+                .outerjoin(post_user, post_user.id == Post.user_id)
+                .outerjoin(comment_user, comment_user.id == PostComment.user_id)
+                .where(*filters)
+            )
+        )
+        or 0
+    )
     rows = (await db.execute(
-        select(Report).order_by(Report.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        base_statement.order_by(Report.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
     )).scalars().all()
     items = []
     for report in rows:

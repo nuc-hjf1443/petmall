@@ -189,10 +189,11 @@ async def product_discount(
 
 @router.get("/admin/merchants/pending", response_model=list[MerchantResponse])
 async def admin_pending_merchants(
+    keyword: str | None = None,
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[Merchant]:
-    return await list_pending_merchants(db)
+    return await list_pending_merchants(db, keyword=keyword)
 
 
 @router.post("/admin/merchants/{merchant_id}/approve", response_model=MerchantResponse)

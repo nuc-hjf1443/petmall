@@ -76,10 +76,11 @@ async def admin_withdrawals(
     page: int = 1,
     page_size: int = 20,
     status: str | None = None,
+    keyword: str | None = None,
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_admin_withdrawals(db, page=page, page_size=page_size, status=status)
+    return await get_admin_withdrawals(db, page=page, page_size=page_size, status=status, keyword=keyword)
 
 
 @router.post("/admin/withdrawals/{withdrawal_id}/approve", response_model=WithdrawalResponse)

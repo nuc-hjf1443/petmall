@@ -153,7 +153,7 @@ export default {
 .pet-slide { display:flex; height:100%; flex-direction:column; padding:28px 26px 36px; box-sizing:border-box; }
 .pet-head { display:flex; min-width:0; align-items:center; gap:14px; }
 .pet-avatar { display:flex; width:64px; height:64px; flex:none; align-items:center; justify-content:center; overflow:hidden; border-radius:50%; background:#fff0df; font-size:34px; }
-.pet-avatar image { display:block; width:100%; height:100%; }
+.pet-avatar image { display:block; width:100%; height:100%; object-fit:cover; }
 .pet-copy { min-width:0; flex:1; }
 .pet-name,.pet-meta { display:block; }.pet-name { overflow:hidden; font-size:20px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }.pet-meta { overflow:hidden; margin-top:5px; color:var(--color-text-secondary); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
 .manage { flex:none; color:var(--color-primary); font-size:12px; }
@@ -167,7 +167,7 @@ export default {
 .quick-icon { display:flex; width:48px; height:48px; align-items:center; justify-content:center; border-radius:15px; color:var(--color-primary); font-weight:800; }
 .product-scroll { width:100%; white-space:nowrap; }.product-row { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
 .product-card { display:flex; min-width:0; flex-direction:column; overflow:hidden; padding-bottom:16px; }
-.product-image,.product-placeholder { width:100%; height:180px; }.product-placeholder { display:flex; align-items:center; justify-content:center; background:linear-gradient(145deg,#fff8ef,#f4e8da); font-size:70px; }
+.product-image,.product-placeholder { width:100%; height:180px; overflow:hidden; }.product-image { display:block; object-fit:cover; }.product-placeholder { display:flex; align-items:center; justify-content:center; background:linear-gradient(145deg,#fff8ef,#f4e8da); font-size:70px; }
 .product-title { overflow:hidden; margin:14px 14px 7px; font-size:14px; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
 .product-price { margin:0 14px; color:var(--color-primary); font-size:17px; font-weight:800; }
 .content-columns { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:28px; }

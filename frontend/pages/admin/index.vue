@@ -17,7 +17,7 @@
 					v-for="item in tabs"
 					:key="item.key"
 					:class="{ active: tab === item.key }"
-					@click="tab = item.key"
+					@click="setTab(item.key)"
 				>
 					<text>{{ item.icon }}</text>{{ item.label }}
 				</view>
@@ -47,11 +47,11 @@
 							<view class="card panel">
 								<text class="panel-title">待办提醒</text>
 								<view class="data-list">
-									<view class="data-row"><text class="data-main">待审核商品</text><text class="status-chip">{{ products.length }}</text></view>
-									<view class="data-row"><text class="data-main">待审核商家</text><text class="status-chip">{{ merchants.length }}</text></view>
-									<view class="data-row"><text class="data-main">领养申请</text><text class="status-chip">{{ adoptions.length }}</text></view>
-									<view class="data-row"><text class="data-main">提现申请</text><text class="status-chip">{{ pendingWithdrawals.length }}</text></view>
-									<view class="data-row"><text class="data-main">内容举报</text><text class="status-chip">{{ pendingReports.length }}</text></view>
+									<view class="data-row"><text class="data-main">待审核商品</text><text class="status-chip">{{ dashboardCounts.products }}</text></view>
+									<view class="data-row"><text class="data-main">待审核商家</text><text class="status-chip">{{ dashboardCounts.merchants }}</text></view>
+									<view class="data-row"><text class="data-main">领养申请</text><text class="status-chip">{{ dashboardCounts.adoptions }}</text></view>
+									<view class="data-row"><text class="data-main">提现申请</text><text class="status-chip">{{ dashboardCounts.withdrawals }}</text></view>
+									<view class="data-row"><text class="data-main">内容举报</text><text class="status-chip">{{ dashboardCounts.reports }}</text></view>
 								</view>
 							</view>
 							<view class="card panel">
@@ -68,6 +68,17 @@
 
 					<view v-else-if="tab === 'users'" class="card panel">
 						<text class="panel-title">平台用户</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.users.keyword" placeholder="搜索手机号、昵称、邮箱" confirm-type="search" @confirm="loadUsers" />
+							<picker :range="userRoleOptions" range-key="label" :value="query.users.roleIndex" @change="changeUserRole">
+								<view class="filter-select">{{ userRoleOptions[query.users.roleIndex].label }}</view>
+							</picker>
+							<picker :range="frozenOptions" range-key="label" :value="query.users.frozenIndex" @change="changeUserFrozen">
+								<view class="filter-select">{{ frozenOptions[query.users.frozenIndex].label }}</view>
+							</picker>
+							<button class="secondary-button" @click="loadUsers">查询</button>
+							<button class="secondary-button" @click="resetQuery('users')">清空</button>
+						</view>
 						<StatePanel v-if="!users.length" icon="-" title="暂无用户数据" />
 						<view v-else class="data-list">
 							<view v-for="item in users" :key="item.id" class="data-row">
@@ -84,6 +95,11 @@
 
 					<view v-else-if="tab === 'products'" class="card panel">
 						<text class="panel-title">商品管理</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.products.keyword" placeholder="搜索商品名、品牌、描述" confirm-type="search" @confirm="loadProducts" />
+							<button class="secondary-button" @click="loadProducts">查询</button>
+							<button class="secondary-button" @click="resetQuery('products')">清空</button>
+						</view>
 						<StatePanel v-if="!products.length && !saleProducts.length" icon="-" title="暂无商品数据" />
 						<view v-if="products.length" class="section-block">
 							<text class="section-title">待审核商品</text>
@@ -115,6 +131,12 @@
 
 					<view v-else-if="tab === 'pets'" class="card panel">
 						<text class="panel-title">全平台宠物</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.pets.keyword" placeholder="搜索宠物名、品种" confirm-type="search" @confirm="loadPets" />
+							<input class="filter-input small" v-model.trim="query.pets.pet_type" placeholder="宠物类型" confirm-type="search" @confirm="loadPets" />
+							<button class="secondary-button" @click="loadPets">查询</button>
+							<button class="secondary-button" @click="resetQuery('pets')">清空</button>
+						</view>
 						<StatePanel v-if="!pets.length" icon="-" title="暂无宠物档案" />
 						<view v-else class="data-list">
 							<view v-for="item in pets" :key="item.id" class="data-row">
@@ -129,6 +151,12 @@
 
 					<view v-else-if="tab === 'orders'" class="card panel">
 						<text class="panel-title">全平台订单</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.orders.order_no" placeholder="搜索订单号" confirm-type="search" @confirm="loadOrders" />
+							<input class="filter-input small" v-model.trim="query.orders.status" placeholder="订单状态" confirm-type="search" @confirm="loadOrders" />
+							<button class="secondary-button" @click="loadOrders">查询</button>
+							<button class="secondary-button" @click="resetQuery('orders')">清空</button>
+						</view>
 						<StatePanel v-if="!orders.length" icon="-" title="暂无订单数据" />
 						<view v-else class="data-list">
 							<view v-for="item in orders" :key="item.id" class="data-row">
@@ -144,6 +172,11 @@
 
 					<view v-else-if="tab === 'merchants'" class="card panel">
 						<text class="panel-title">待审核商家</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.merchants.keyword" placeholder="搜索店铺、联系人、手机号、经营范围" confirm-type="search" @confirm="loadMerchants" />
+							<button class="secondary-button" @click="loadMerchants">查询</button>
+							<button class="secondary-button" @click="resetQuery('merchants')">清空</button>
+						</view>
 						<StatePanel v-if="!merchants.length" icon="-" title="没有待审核商家" />
 						<view v-else class="data-list">
 							<view v-for="item in merchants" :key="item.id" class="data-row">
@@ -159,6 +192,14 @@
 
 					<view v-else-if="tab === 'content'" class="card panel">
 						<text class="panel-title">内容举报</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.reports.keyword" placeholder="搜索举报原因、内容、用户" confirm-type="search" @confirm="loadReports" />
+							<picker :range="reportStatusOptions" range-key="label" :value="query.reports.statusIndex" @change="changeReportStatus">
+								<view class="filter-select">{{ reportStatusOptions[query.reports.statusIndex].label }}</view>
+							</picker>
+							<button class="secondary-button" @click="loadReports">查询</button>
+							<button class="secondary-button" @click="resetQuery('reports')">清空</button>
+						</view>
 						<StatePanel v-if="!reports.length" icon="-" title="没有内容举报" />
 						<view v-else class="data-list">
 							<view v-for="item in reports" :key="item.id" class="data-row">
@@ -176,6 +217,14 @@
 
 					<view v-else-if="tab === 'adoptions'" class="card panel">
 						<text class="panel-title">领养申请审核</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.adoptions.keyword" placeholder="搜索联系人、手机号、城市、理由" confirm-type="search" @confirm="loadAdoptions" />
+							<picker :range="auditStatusOptions" range-key="label" :value="query.adoptions.statusIndex" @change="changeAdoptionStatus">
+								<view class="filter-select">{{ auditStatusOptions[query.adoptions.statusIndex].label }}</view>
+							</picker>
+							<button class="secondary-button" @click="loadAdoptions">查询</button>
+							<button class="secondary-button" @click="resetQuery('adoptions')">清空</button>
+						</view>
 						<StatePanel v-if="!adoptions.length" icon="-" title="没有待审核领养申请" />
 						<view v-else class="data-list">
 							<view v-for="item in adoptions" :key="item.id" class="data-row">
@@ -192,6 +241,14 @@
 
 					<view v-else-if="tab === 'withdrawals'" class="card panel">
 						<text class="panel-title">提现审核</text>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.withdrawals.keyword" placeholder="搜索提现单号、用户、账户名、支付宝" confirm-type="search" @confirm="loadWithdrawals" />
+							<picker :range="auditStatusOptions" range-key="label" :value="query.withdrawals.statusIndex" @change="changeWithdrawalStatus">
+								<view class="filter-select">{{ auditStatusOptions[query.withdrawals.statusIndex].label }}</view>
+							</picker>
+							<button class="secondary-button" @click="loadWithdrawals">查询</button>
+							<button class="secondary-button" @click="resetQuery('withdrawals')">清空</button>
+						</view>
 						<StatePanel v-if="!withdrawals.length" icon="-" title="没有提现申请" />
 						<view v-else class="data-list">
 							<view v-for="item in withdrawals" :key="item.id" class="data-row">
@@ -242,6 +299,11 @@
 							<view class="support-tab" :class="{ active: supportFilter === 'pending' }" @click="setSupportFilter('pending')">未处理</view>
 							<view class="support-tab" :class="{ active: supportFilter === 'resolved' }" @click="setSupportFilter('resolved')">已处理</view>
 						</view>
+						<view class="filter-bar">
+							<input class="filter-input" v-model.trim="query.support.keyword" placeholder="搜索会话、最近消息" confirm-type="search" @confirm="loadSupport" />
+							<button class="secondary-button" @click="loadSupport">查询</button>
+							<button class="secondary-button" @click="resetQuery('support')">清空</button>
+						</view>
 						<StatePanel v-if="!supportConversations.length" icon="-" title="暂无客服会话" />
 						<view v-else class="support-list">
 							<view v-for="item in supportConversations" :key="item.id" class="support-row">
@@ -274,6 +336,7 @@ export default {
 		return {
 			tab: 'dashboard',
 			loading: true,
+			loadedTabs: {},
 			admin: {},
 			users: [],
 			products: [],
@@ -289,6 +352,46 @@ export default {
 			platformDocuments: [],
 			supportConversations: [],
 			supportFilter: 'pending',
+			dashboardCounts: {
+				products: 0,
+				merchants: 0,
+				adoptions: 0,
+				withdrawals: 0,
+				reports: 0
+			},
+			query: {
+				users: { keyword: '', roleIndex: 0, frozenIndex: 0 },
+				products: { keyword: '' },
+				pets: { keyword: '', pet_type: '' },
+				orders: { order_no: '', status: '' },
+				merchants: { keyword: '' },
+				reports: { keyword: '', statusIndex: 1 },
+				adoptions: { keyword: '', statusIndex: 1 },
+				withdrawals: { keyword: '', statusIndex: 1 },
+				support: { keyword: '' }
+			},
+			userRoleOptions: [
+				{ label: '全部角色', value: '' },
+				{ label: '管理员', value: 'admin' },
+				{ label: '商家', value: 'merchant' },
+				{ label: '普通用户', value: 'user' }
+			],
+			frozenOptions: [
+				{ label: '全部状态', value: '' },
+				{ label: '正常', value: false },
+				{ label: '已冻结', value: true }
+			],
+			reportStatusOptions: [
+				{ label: '全部状态', value: '' },
+				{ label: '待处理', value: 'pending' },
+				{ label: '已处理', value: 'resolved' }
+			],
+			auditStatusOptions: [
+				{ label: '全部状态', value: '' },
+				{ label: '待审核', value: 'pending' },
+				{ label: '已通过', value: 'approved' },
+				{ label: '已驳回', value: 'rejected' }
+			],
 			tabs: [
 				{ key: 'dashboard', icon: 'D', label: '数据面板', desc: '平台待办和经营概览' },
 				{ key: 'users', icon: 'U', label: '用户管理', desc: '账号状态与冻结管理' },
@@ -310,11 +413,11 @@ export default {
 		},
 		metrics() {
 			return [
-				{ label: '平台用户', value: this.users.length },
-				{ label: '宠物档案', value: this.overview.pet_count || this.pets.length },
-				{ label: '订单总数', value: this.overview.order_count || this.orders.length },
+				{ label: '平台用户', value: this.overview.user_count || 0 },
+				{ label: '宠物档案', value: this.overview.pet_count || 0 },
+				{ label: '订单总数', value: this.overview.order_count || 0 },
 				{ label: 'GMV', value: this.money(this.overview.gmv) },
-				{ label: '提现申请', value: this.pendingWithdrawals.length }
+				{ label: '提现申请', value: this.dashboardCounts.withdrawals }
 			]
 		},
 		pendingWithdrawals() {
@@ -325,7 +428,7 @@ export default {
 		}
 	},
 	onLoad() {
-		this.loadAll()
+		this.bootstrap()
 	},
 	methods: {
 		money(value) {
@@ -334,7 +437,7 @@ export default {
 		canForceCancel(order) {
 			return !['cancelled', 'completed', 'refunded', 'after_sale'].includes(order.status)
 		},
-		async loadAll() {
+		async bootstrap() {
 			this.loading = true
 			try {
 				this.admin = await userApi.me()
@@ -343,44 +446,158 @@ export default {
 					setTimeout(() => uni.reLaunch({ url: '/pages/profile/index' }), 800)
 					return
 				}
+				await this.loadCurrentTab(true)
 			} catch (e) {
 				this.loading = false
-				return
 			}
-
+		},
+		setTab(key) {
+			if (this.tab === key) return
+			this.tab = key
+			if (!this.loadedTabs[key]) this.loadCurrentTab()
+		},
+		async loadAll() {
+			this.loading = true
+			await this.loadCurrentTab(true)
+		},
+		async loadCurrentTab(force = false) {
+			this.loading = true
+			try {
+				const loaders = {
+					dashboard: this.loadDashboard,
+					users: this.loadUsers,
+					products: this.loadProducts,
+					pets: this.loadPets,
+					orders: this.loadOrders,
+					merchants: this.loadMerchants,
+					content: this.loadReports,
+					adoptions: this.loadAdoptions,
+					withdrawals: this.loadWithdrawals,
+					support: this.loadSupport,
+					knowledge: this.loadKnowledge
+				}
+				await (loaders[this.tab] || this.loadDashboard).call(this)
+				this.$set(this.loadedTabs, this.tab, true)
+			} finally {
+				this.loading = false
+			}
+		},
+		async loadDashboard() {
 			const result = await Promise.allSettled([
-				adminApi.users(),
-				adminApi.pendingProducts({ page: 1, page_size: 100 }),
-				adminApi.pendingMerchants(),
-				adminApi.reports({ page: 1, page_size: 100 }),
-				adminApi.adoptionApplications({}),
-				adminApi.pets({ page: 1, page_size: 100 }),
-				adminApi.orders({ page: 1, page_size: 100 }),
 				adminApi.statisticsOverview(),
-				productApi.list({ page: 1, page_size: 100 }),
-				walletApi.adminWithdrawals({ page: 1, page_size: 100 }),
-				adminApi.platformKnowledge(),
-				adminApi.platformKnowledgeDocuments(),
-				supportApi.adminList({ status: this.supportFilter, page: 1, page_size: 100 })
+				adminApi.pendingProducts({ page: 1, page_size: 1 }),
+				adminApi.pendingMerchants({}),
+				adminApi.adoptionApplications({ status: 'pending' }),
+				walletApi.adminWithdrawals({ status: 'pending', page: 1, page_size: 1 }),
+				adminApi.reports({ status: 'pending', page: 1, page_size: 1 })
 			])
-			if (result[0].status === 'fulfilled') this.users = result[0].value || []
-			if (result[1].status === 'fulfilled') this.products = result[1].value?.items || []
-			if (result[2].status === 'fulfilled') this.merchants = result[2].value || []
-			if (result[3].status === 'fulfilled') this.reports = result[3].value?.items || []
-			if (result[4].status === 'fulfilled') this.adoptions = result[4].value || []
-			if (result[5].status === 'fulfilled') this.pets = result[5].value?.items || []
-			if (result[6].status === 'fulfilled') this.orders = result[6].value?.items || []
-			if (result[7].status === 'fulfilled') this.overview = result[7].value || {}
-			if (result[8].status === 'fulfilled') this.saleProducts = result[8].value?.items || []
-			if (result[9].status === 'fulfilled') this.withdrawals = result[9].value?.items || []
-			if (result[10].status === 'fulfilled') this.platformKnowledge = result[10].value || null
-			if (result[11].status === 'fulfilled') this.platformDocuments = result[11].value || []
-			if (result[12].status === 'fulfilled') this.supportConversations = result[12].value?.items || []
-			this.loading = false
+			if (result[0].status === 'fulfilled') this.overview = result[0].value || {}
+			this.dashboardCounts = {
+				products: result[1].status === 'fulfilled' ? (result[1].value?.total || 0) : this.dashboardCounts.products,
+				merchants: result[2].status === 'fulfilled' ? (result[2].value || []).length : this.dashboardCounts.merchants,
+				adoptions: result[3].status === 'fulfilled' ? (result[3].value || []).length : this.dashboardCounts.adoptions,
+				withdrawals: result[4].status === 'fulfilled' ? (result[4].value?.total || 0) : this.dashboardCounts.withdrawals,
+				reports: result[5].status === 'fulfilled' ? (result[5].value?.total || 0) : this.dashboardCounts.reports
+			}
+		},
+		async loadUsers() {
+			const q = this.query.users
+			const result = await adminApi.users({
+				page: 1,
+				page_size: 100,
+				keyword: q.keyword || undefined,
+				role: this.userRoleOptions[q.roleIndex].value || undefined,
+				is_frozen: this.frozenOptions[q.frozenIndex].value === '' ? undefined : this.frozenOptions[q.frozenIndex].value
+			})
+			this.users = result.items || []
+		},
+		async loadProducts() {
+			const keyword = this.query.products.keyword || undefined
+			const result = await Promise.allSettled([
+				adminApi.pendingProducts({ page: 1, page_size: 100, keyword }),
+				productApi.list({ page: 1, page_size: 100, keyword })
+			])
+			if (result[0].status === 'fulfilled') this.products = result[0].value?.items || []
+			if (result[1].status === 'fulfilled') this.saleProducts = result[1].value?.items || []
+		},
+		async loadPets() {
+			const q = this.query.pets
+			const result = await adminApi.pets({
+				page: 1,
+				page_size: 100,
+				keyword: q.keyword || undefined,
+				pet_type: q.pet_type || undefined
+			})
+			this.pets = result.items || []
+		},
+		async loadOrders() {
+			const q = this.query.orders
+			const result = await adminApi.orders({
+				page: 1,
+				page_size: 100,
+				order_no: q.order_no || undefined,
+				status: q.status || undefined
+			})
+			this.orders = result.items || []
+		},
+		async loadMerchants() {
+			const result = await adminApi.pendingMerchants({ keyword: this.query.merchants.keyword || undefined })
+			this.merchants = result || []
+		},
+		async loadReports() {
+			const q = this.query.reports
+			const result = await adminApi.reports({
+				page: 1,
+				page_size: 100,
+				keyword: q.keyword || undefined,
+				status: this.reportStatusOptions[q.statusIndex].value || undefined
+			})
+			this.reports = result.items || []
+		},
+		async loadAdoptions() {
+			const q = this.query.adoptions
+			const result = await adminApi.adoptionApplications({
+				status: this.auditStatusOptions[q.statusIndex].value || undefined
+			})
+			const keyword = (q.keyword || '').toLowerCase()
+			this.adoptions = keyword
+				? (result || []).filter(item => [
+					item.contact_name,
+					item.contact_phone,
+					item.living_city,
+					item.living_condition,
+					item.reason
+				].some(value => String(value || '').toLowerCase().includes(keyword)))
+				: (result || [])
+		},
+		async loadWithdrawals() {
+			const q = this.query.withdrawals
+			const result = await walletApi.adminWithdrawals({
+				page: 1,
+				page_size: 100,
+				keyword: q.keyword || undefined,
+				status: this.auditStatusOptions[q.statusIndex].value || undefined
+			})
+			this.withdrawals = result.items || []
+		},
+		async loadKnowledge() {
+			const result = await Promise.allSettled([
+				adminApi.platformKnowledge(),
+				adminApi.platformKnowledgeDocuments()
+			])
+			if (result[0].status === 'fulfilled') this.platformKnowledge = result[0].value || null
+			if (result[1].status === 'fulfilled') this.platformDocuments = result[1].value || []
 		},
 		async loadSupport() {
 			const result = await supportApi.adminList({ status: this.supportFilter, page: 1, page_size: 100 })
-			this.supportConversations = result.items || []
+			const keyword = (this.query.support.keyword || '').toLowerCase()
+			const rows = result.items || []
+			this.supportConversations = keyword
+				? rows.filter(item => [
+					this.supportTitle(item),
+					item.messages?.slice(-1)[0]?.content
+				].some(value => String(value || '').toLowerCase().includes(keyword)))
+				: rows
 		},
 		async setSupportFilter(status) {
 			this.supportFilter = status
@@ -395,9 +612,67 @@ export default {
 			uni.navigateTo({ url: `/pages/support/platform?id=${item.id}&role=admin` })
 		},
 		async setSupportStatus(item, status) {
-			await supportApi.adminStatus(item.id, status)
+			const updated = await supportApi.adminStatus(item.id, status)
 			uni.showToast({ title: status === 'resolved' ? '已标记处理' : '已标记未处理' })
-			this.loadSupport()
+			this.updateOrRemoveByStatus('supportConversations', updated, this.supportFilter)
+		},
+		changeUserRole(e) {
+			this.query.users.roleIndex = Number(e.detail.value)
+			this.loadUsers()
+		},
+		changeUserFrozen(e) {
+			this.query.users.frozenIndex = Number(e.detail.value)
+			this.loadUsers()
+		},
+		changeReportStatus(e) {
+			this.query.reports.statusIndex = Number(e.detail.value)
+			this.loadReports()
+		},
+		changeAdoptionStatus(e) {
+			this.query.adoptions.statusIndex = Number(e.detail.value)
+			this.loadAdoptions()
+		},
+		changeWithdrawalStatus(e) {
+			this.query.withdrawals.statusIndex = Number(e.detail.value)
+			this.loadWithdrawals()
+		},
+		resetQuery(key) {
+			const defaults = {
+				users: { keyword: '', roleIndex: 0, frozenIndex: 0 },
+				products: { keyword: '' },
+				pets: { keyword: '', pet_type: '' },
+				orders: { order_no: '', status: '' },
+				merchants: { keyword: '' },
+				reports: { keyword: '', statusIndex: 1 },
+				adoptions: { keyword: '', statusIndex: 1 },
+				withdrawals: { keyword: '', statusIndex: 1 },
+				support: { keyword: '' }
+			}
+			this.query[key] = { ...defaults[key] }
+			this.loadCurrentTab(true)
+		},
+		replaceById(listName, item) {
+			const list = this[listName] || []
+			const index = list.findIndex(row => row.id === item.id)
+			if (index >= 0) this.$set(list, index, item)
+		},
+		removeById(listName, id) {
+			this[listName] = (this[listName] || []).filter(row => row.id !== id)
+		},
+		updateOrRemoveByStatus(listName, item, activeStatus) {
+			if (activeStatus && item.status !== activeStatus) {
+				this.removeById(listName, item.id)
+				return
+			}
+			this.replaceById(listName, item)
+		},
+		updateOrRemoveUser(item) {
+			const activeFrozen = this.frozenOptions[this.query.users.frozenIndex].value
+			if (activeFrozen !== '' && item.is_frozen !== activeFrozen) {
+				this.removeById('users', item.id)
+				return
+			}
+			this.replaceById('users', item)
 		},
 		chooseFile(callback) {
 			const done = res => {
@@ -409,22 +684,22 @@ export default {
 		},
 		choosePlatformKnowledgeDocument() {
 			this.chooseFile(async filePath => {
-				await adminApi.uploadPlatformKnowledgeDocument(filePath)
+				const doc = await adminApi.uploadPlatformKnowledgeDocument(filePath)
 				uni.showToast({ title: '平台知识文件已提交解析' })
-				this.loadAll()
+				if (doc?.id) this.platformDocuments = [doc, ...this.platformDocuments]
 			})
 		},
 		choosePlatformKnowledgeReplacement(item) {
 			this.chooseFile(async filePath => {
-				await adminApi.replacePlatformKnowledgeDocument(item.id, filePath)
+				const doc = await adminApi.replacePlatformKnowledgeDocument(item.id, filePath)
 				uni.showToast({ title: '平台知识文件已替换' })
-				this.loadAll()
+				if (doc?.id) this.replaceById('platformDocuments', doc)
 			})
 		},
 		async reindexPlatformKnowledge(item) {
-			await adminApi.reindexPlatformKnowledgeDocument(item.id)
+			const doc = await adminApi.reindexPlatformKnowledgeDocument(item.id)
 			uni.showToast({ title: '已提交重建索引' })
-			this.loadAll()
+			if (doc?.id) this.replaceById('platformDocuments', doc)
 		},
 		deletePlatformKnowledge(item) {
 			uni.showModal({
@@ -434,7 +709,7 @@ export default {
 					if (!result.confirm) return
 					await adminApi.deletePlatformKnowledgeDocument(item.id)
 					uni.showToast({ title: '删除任务已提交' })
-					this.loadAll()
+					this.removeById('platformDocuments', item.id)
 				}
 			})
 		},
@@ -478,58 +753,59 @@ export default {
 		},
 		freeze(item) {
 			this.reason('冻结用户', async reason => {
-				await adminApi.freezeUser(item.id, { reason })
+				const updated = await adminApi.freezeUser(item.id, { reason })
 				uni.showToast({ title: '用户已冻结' })
-				this.loadAll()
+				this.updateOrRemoveUser(updated)
 			}, true)
 		},
 		unfreeze(item) {
 			this.reason('解冻用户', async reason => {
-				await adminApi.unfreezeUser(item.id, { reason })
+				const updated = await adminApi.unfreezeUser(item.id, { reason })
 				uni.showToast({ title: '用户已解冻' })
-				this.loadAll()
+				this.updateOrRemoveUser(updated)
 			})
 		},
 		approveProduct(item) {
 			this.reason('通过商品审核', async reason => {
 				await adminApi.approveProduct(item.id, { reason })
 				uni.showToast({ title: '商品已通过' })
-				this.loadAll()
+				this.removeById('products', item.id)
 			})
 		},
 		rejectProduct(item) {
 			this.reason('驳回商品', async reason => {
 				await adminApi.rejectProduct(item.id, { reason })
 				uni.showToast({ title: '商品已驳回' })
-				this.loadAll()
+				this.removeById('products', item.id)
 			}, true)
 		},
 		offSaleProduct(item) {
 			this.reason('强制下架商品', async reason => {
 				await adminApi.offSaleProduct(item.id, { reason })
 				uni.showToast({ title: '商品已下架' })
-				this.loadAll()
+				this.removeById('products', item.id)
+				this.removeById('saleProducts', item.id)
 			}, true)
 		},
 		forceCancelOrder(item) {
 			this.reason('强制取消订单', async reason => {
-				await adminApi.forceCancelOrder(item.id, { reason })
+				const updated = await adminApi.forceCancelOrder(item.id, { reason })
 				uni.showToast({ title: '订单已取消' })
-				this.loadAll()
+				this.updateOrRemoveByStatus('orders', updated, this.query.orders.status)
 			}, true)
 		},
 		approveMerchant(item) {
 			this.reason('通过商家审核', async reason => {
 				await adminApi.approveMerchant(item.id, { reason })
 				uni.showToast({ title: '商家已通过' })
-				this.loadAll()
+				this.removeById('merchants', item.id)
 			})
 		},
 		rejectMerchant(item) {
 			this.reason('驳回商家', async reason => {
 				await adminApi.rejectMerchant(item.id, { reason })
 				uni.showToast({ title: '商家已驳回' })
-				this.loadAll()
+				this.removeById('merchants', item.id)
 			}, true)
 		},
 		resolveReport(item, action) {
@@ -540,35 +816,40 @@ export default {
 			this.reason(action === 'take_down' ? '下架被举报内容' : '驳回举报', async reason => {
 				await adminApi.resolveReport(item.id, { action, reason })
 				uni.showToast({ title: '举报已处理' })
-				this.loadAll()
+				const updated = { ...item, status: 'resolved', action, resolution_reason: reason }
+				if (this.reportStatusOptions[this.query.reports.statusIndex].value === 'pending') {
+					this.removeById('reports', item.id)
+				} else {
+					this.replaceById('reports', updated)
+				}
 			})
 		},
 		approveAdoption(item) {
 			this.reason('通过领养申请', async reason => {
-				await adminApi.approveAdoptionApplication(item.id, { reason })
+				const updated = await adminApi.approveAdoptionApplication(item.id, { reason })
 				uni.showToast({ title: '申请已通过' })
-				this.loadAll()
+				this.updateOrRemoveByStatus('adoptions', updated, this.auditStatusOptions[this.query.adoptions.statusIndex].value)
 			})
 		},
 		rejectAdoption(item) {
 			this.reason('驳回领养申请', async reason => {
-				await adminApi.rejectAdoptionApplication(item.id, { reason })
+				const updated = await adminApi.rejectAdoptionApplication(item.id, { reason })
 				uni.showToast({ title: '申请已驳回' })
-				this.loadAll()
+				this.updateOrRemoveByStatus('adoptions', updated, this.auditStatusOptions[this.query.adoptions.statusIndex].value)
 			}, true)
 		},
 		approveWithdrawal(item) {
 			this.reason('通过提现申请', async reason => {
-				await walletApi.approveWithdrawal(item.id, { reason })
+				const updated = await walletApi.approveWithdrawal(item.id, { reason })
 				uni.showToast({ title: '提现已通过' })
-				this.loadAll()
+				this.updateOrRemoveByStatus('withdrawals', updated, this.auditStatusOptions[this.query.withdrawals.statusIndex].value)
 			})
 		},
 		rejectWithdrawal(item) {
 			this.reason('驳回提现申请', async reason => {
-				await walletApi.rejectWithdrawal(item.id, { reason })
+				const updated = await walletApi.rejectWithdrawal(item.id, { reason })
 				uni.showToast({ title: '提现已驳回' })
-				this.loadAll()
+				this.updateOrRemoveByStatus('withdrawals', updated, this.auditStatusOptions[this.query.withdrawals.statusIndex].value)
 			}, true)
 		},
 		logout() {
@@ -583,5 +864,5 @@ export default {
 </script>
 
 <style scoped lang="scss">
-.admin-shell{height:100vh;background:#f7f7f8}.admin-bar{display:flex;height:68px;align-items:center;justify-content:space-between;padding:0 25px;border-bottom:1px solid #e7e7e9;background:#fff}.brand,.sub{display:block}.brand{font-size:20px;font-weight:800}.sub{margin-top:3px;color:#888;font-size:10px}.admin-actions{display:flex;align-items:center;gap:12px;font-size:12px}.admin-layout{display:grid;height:calc(100vh - 68px);grid-template-columns:210px 1fr}.sidebar{padding:16px 10px;background:#24262c;color:#bbb}.sidebar view{display:flex;align-items:center;gap:10px;margin:3px 0;padding:12px 14px;border-radius:9px;font-size:12px}.sidebar view.active{background:var(--color-primary);color:#fff}.workspace{height:100%}.workspace-inner{padding:24px}.metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.metric{display:flex;flex-direction:column;gap:8px;padding:20px}.metric text:first-child{font-size:27px;font-weight:800}.metric text:last-child{color:var(--color-text-secondary);font-size:11px}.overview{margin-top:16px}.section-block{margin-top:16px}.section-block:first-of-type{margin-top:0}.section-title{display:block;margin-bottom:10px;font-size:13px;font-weight:800;color:var(--color-text-secondary)}.panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.panel-heading .panel-title{margin-bottom:4px}.error-text{display:block;margin-top:5px;color:var(--color-danger);font-size:11px;line-height:1.5}.support-panel{padding:24px}.support-tabs{display:inline-flex;gap:4px;margin:2px 0 18px;padding:4px;border:1px solid var(--color-border);border-radius:10px;background:#fff8f1}.support-tab{min-width:76px;height:32px;padding:0 14px;border-radius:8px;color:var(--color-text-secondary);font-size:12px;font-weight:700;line-height:32px;text-align:center;cursor:pointer}.support-tab.active{background:#fff;color:var(--color-primary);box-shadow:0 4px 14px rgba(56,38,22,.08)}.support-list{display:grid;gap:10px}.support-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:18px;padding:16px 18px;border:1px solid var(--color-border);border-radius:12px;background:#fff}.support-main{min-width:0}.support-actions{display:flex;align-items:center;gap:10px}.support-actions .secondary-button{height:34px;padding:0 16px;border-radius:17px;font-size:12px;line-height:34px}.status-chip.resolved{background:#eaf8f0;color:var(--color-success)}@media(max-width:767px){.admin-bar{height:58px;padding:0 12px}.admin-layout{height:calc(100vh - 58px);grid-template-columns:64px 1fr}.sidebar{padding:8px 5px}.sidebar view{justify-content:center;padding:11px 5px;font-size:0}.sidebar view text{font-size:18px}.workspace-inner{padding:12px}.metric-grid{grid-template-columns:repeat(2,1fr)}.panel-heading{flex-direction:column}.support-panel{padding:16px}.support-tabs{display:flex;width:100%}.support-tab{flex:1}.support-row{grid-template-columns:1fr;align-items:flex-start;padding:14px}.support-actions{width:100%;flex-wrap:wrap}.support-actions .secondary-button{flex:1;min-width:120px}}
+.admin-shell{height:100vh;background:#f7f7f8}.admin-bar{display:flex;height:68px;align-items:center;justify-content:space-between;padding:0 25px;border-bottom:1px solid #e7e7e9;background:#fff}.brand,.sub{display:block}.brand{font-size:20px;font-weight:800}.sub{margin-top:3px;color:#888;font-size:10px}.admin-actions{display:flex;align-items:center;gap:12px;font-size:12px}.admin-layout{display:grid;height:calc(100vh - 68px);grid-template-columns:210px 1fr}.sidebar{padding:16px 10px;background:#24262c;color:#bbb}.sidebar view{display:flex;align-items:center;gap:10px;margin:3px 0;padding:12px 14px;border-radius:9px;font-size:12px}.sidebar view.active{background:var(--color-primary);color:#fff}.workspace{height:100%}.workspace-inner{padding:24px}.metric-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.metric{display:flex;flex-direction:column;gap:8px;padding:20px}.metric text:first-child{font-size:27px;font-weight:800}.metric text:last-child{color:var(--color-text-secondary);font-size:11px}.overview{margin-top:16px}.filter-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0 16px}.filter-input{width:280px;height:36px;box-sizing:border-box;padding:0 12px;border:1px solid var(--color-border);border-radius:8px;background:#fff;font-size:12px}.filter-input.small{width:140px}.filter-select{min-width:96px;height:36px;box-sizing:border-box;padding:0 12px;border:1px solid var(--color-border);border-radius:8px;background:#fff;color:var(--color-text-secondary);font-size:12px;line-height:36px}.filter-bar .secondary-button{height:36px;padding:0 14px;border-radius:8px;font-size:12px;line-height:36px}.section-block{margin-top:16px}.section-block:first-of-type{margin-top:0}.section-title{display:block;margin-bottom:10px;font-size:13px;font-weight:800;color:var(--color-text-secondary)}.panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.panel-heading .panel-title{margin-bottom:4px}.error-text{display:block;margin-top:5px;color:var(--color-danger);font-size:11px;line-height:1.5}.support-panel{padding:24px}.support-tabs{display:inline-flex;gap:4px;margin:2px 0 10px;padding:4px;border:1px solid var(--color-border);border-radius:10px;background:#fff8f1}.support-tab{min-width:76px;height:32px;padding:0 14px;border-radius:8px;color:var(--color-text-secondary);font-size:12px;font-weight:700;line-height:32px;text-align:center;cursor:pointer}.support-tab.active{background:#fff;color:var(--color-primary);box-shadow:0 4px 14px rgba(56,38,22,.08)}.support-list{display:grid;gap:10px}.support-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:18px;padding:16px 18px;border:1px solid var(--color-border);border-radius:12px;background:#fff}.support-main{min-width:0}.support-actions{display:flex;align-items:center;gap:10px}.support-actions .secondary-button{height:34px;padding:0 16px;border-radius:17px;font-size:12px;line-height:34px}.status-chip.resolved{background:#eaf8f0;color:var(--color-success)}@media(max-width:767px){.admin-bar{height:58px;padding:0 12px}.admin-layout{height:calc(100vh - 58px);grid-template-columns:64px 1fr}.sidebar{padding:8px 5px}.sidebar view{justify-content:center;padding:11px 5px;font-size:0}.sidebar view text{font-size:18px}.workspace-inner{padding:12px}.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{align-items:stretch}.filter-input,.filter-input.small,.filter-select{width:100%}.filter-bar .secondary-button{flex:1}.panel-heading{flex-direction:column}.support-panel{padding:16px}.support-tabs{display:flex;width:100%}.support-tab{flex:1}.support-row{grid-template-columns:1fr;align-items:flex-start;padding:14px}.support-actions{width:100%;flex-wrap:wrap}.support-actions .secondary-button{flex:1;min-width:120px}}
 </style>

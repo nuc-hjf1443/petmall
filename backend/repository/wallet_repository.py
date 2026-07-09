@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.wallet import WalletAccount, WalletRecharge, WalletTransaction, WithdrawalRequest
@@ -60,12 +60,24 @@ async def list_admin_withdrawals(
     page: int,
     page_size: int,
     status: str | None,
+    keyword: str | None = None,
 ) -> tuple[list[WithdrawalRequest], int, int, int]:
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
     filters = []
     if status:
         filters.append(WithdrawalRequest.status == status)
+    clean_keyword = keyword.strip() if keyword else ""
+    if clean_keyword:
+        pattern = f"%{clean_keyword}%"
+        filters.append(
+            or_(
+                WithdrawalRequest.withdrawal_no.ilike(pattern),
+                WithdrawalRequest.account_name.ilike(pattern),
+                WithdrawalRequest.alipay_account.ilike(pattern),
+                cast(WithdrawalRequest.user_id, String).ilike(pattern),
+            )
+        )
     total = int((await db.scalar(select(func.count(WithdrawalRequest.id)).where(*filters))) or 0)
     result = await db.execute(
         select(WithdrawalRequest)

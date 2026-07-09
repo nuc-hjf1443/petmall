@@ -99,7 +99,7 @@
 							<text class="recommend-intro">下面是根据这次需求筛出的真实在售商品，价格、库存和规格以卡片为准。</text>
 							<view class="product-grid">
 								<view v-for="item in messageRecommendations(msg)" :key="item.product_id" class="product-card">
-									<image class="product-image" :src="productImage(item.product)" mode="aspectFit" />
+									<image class="product-image" :src="productImage(item.product)" mode="aspectFill" />
 									<text class="product-title">{{ item.product.title }}</text>
 									<view class="product-tags">
 										<text v-for="tag in recommendTags(item)" :key="tag">{{ tag }}</text>
@@ -964,10 +964,13 @@ export default {
 	border-radius: var(--radius-sm);
 }
 .product-image {
+	display: block;
 	width: 100%;
 	height: 116px;
+	overflow: hidden;
 	border-radius: var(--radius-sm);
 	background: #fffaf6;
+	object-fit: cover;
 }
 .product-title {
 	overflow: hidden;
