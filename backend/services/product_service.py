@@ -568,6 +568,7 @@ async def get_pending_products_for_audit(
     *,
     page: int = 1,
     page_size: int = 20,
+    keyword: str | None = None,
 ) -> dict:
     safe_page = max(page, 1)
     safe_page_size = min(max(page_size, 1), 100)
@@ -576,6 +577,7 @@ async def get_pending_products_for_audit(
         ProductStatus.PENDING.value,
         page=safe_page,
         page_size=safe_page_size,
+        keyword=keyword,
     )
     return {
         "items": [

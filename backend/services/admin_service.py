@@ -13,6 +13,7 @@ from models.pet import PetDetailProfile, PetProfile
 from models.product import Product
 from models.user import User
 from schemas.admin_schema import (
+    AdminUserListResponse,
     AdminOrderListResponse,
     AdminOrderResponse,
     AdminOrderTrendItem,
@@ -39,9 +40,45 @@ async def admin_login(db: AsyncSession, payload: LoginRequest) -> TokenResponse:
     return token
 
 
-async def list_users(db: AsyncSession) -> list[User]:
-    result = await db.execute(select(User).order_by(User.created_at.desc(), User.id.desc()))
-    return list(result.scalars().all())
+async def list_users(
+    db: AsyncSession,
+    *,
+    page: int,
+    page_size: int,
+    keyword: str | None = None,
+    role: str | None = None,
+    is_frozen: bool | None = None,
+) -> AdminUserListResponse:
+    page, page_size = _page_bounds(page, page_size)
+    filters = [User.is_deleted.is_(False)]
+    clean_keyword = keyword.strip() if keyword else ""
+    if clean_keyword:
+        pattern = f"%{clean_keyword}%"
+        filters.append(or_(User.phone.ilike(pattern), User.nickname.ilike(pattern), User.email.ilike(pattern)))
+    if role == "admin":
+        filters.append(User.is_admin.is_(True))
+    elif role == "merchant":
+        filters.append(User.is_merchant.is_(True))
+    elif role == "user":
+        filters.append(User.is_admin.is_(False))
+        filters.append(User.is_merchant.is_(False))
+    if is_frozen is not None:
+        filters.append(User.is_frozen.is_(is_frozen))
+
+    total = int((await db.scalar(select(func.count(User.id)).where(*filters))) or 0)
+    result = await db.execute(
+        select(User)
+        .where(*filters)
+        .order_by(User.created_at.desc(), User.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return AdminUserListResponse(
+        items=list(result.scalars().all()),
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 async def set_user_frozen(

@@ -24,6 +24,13 @@ class AdminUserResponse(BaseModel):
     created_at: datetime
 
 
+class AdminUserListResponse(BaseModel):
+    items: list[AdminUserResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 class AdminReasonRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 

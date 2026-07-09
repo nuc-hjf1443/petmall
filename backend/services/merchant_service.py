@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -74,11 +74,23 @@ async def update_my_merchant(
     return await get_my_merchant(db, user_id)
 
 
-async def list_pending_merchants(db: AsyncSession) -> list[Merchant]:
+async def list_pending_merchants(db: AsyncSession, keyword: str | None = None) -> list[Merchant]:
+    filters = [Merchant.status == "pending"]
+    clean_keyword = keyword.strip() if keyword else ""
+    if clean_keyword:
+        pattern = f"%{clean_keyword}%"
+        filters.append(
+            or_(
+                Merchant.shop_name.ilike(pattern),
+                Merchant.contact_name.ilike(pattern),
+                Merchant.contact_phone.ilike(pattern),
+                Merchant.business_scope.ilike(pattern),
+            )
+        )
     result = await db.execute(
         select(Merchant)
         .options(selectinload(Merchant.qualifications))
-        .where(Merchant.status == "pending")
+        .where(*filters)
         .order_by(Merchant.created_at.asc(), Merchant.id.asc())
     )
     return list(result.scalars().all())

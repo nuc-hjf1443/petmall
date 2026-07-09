@@ -282,10 +282,13 @@ export default {
 }
 .drawer-item.disabled { opacity: .62; }
 .drawer-image {
+	display: block;
 	width: 58px;
 	height: 58px;
+	overflow: hidden;
 	border-radius: 8px;
 	background: #f7efe7;
+	object-fit: cover;
 }
 .drawer-image.placeholder {
 	display: flex;

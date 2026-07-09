@@ -15,6 +15,7 @@ from schemas.admin_schema import (
     AdminPetListResponse,
     AdminReasonRequest,
     AdminReportResolveRequest,
+    AdminUserListResponse,
     AdminUserResponse,
 )
 from schemas.knowledge_schema import KnowledgeBaseResponse, KnowledgeDocumentResponse
@@ -56,12 +57,24 @@ async def login_admin(
     return AdminLoginResponse(**token.model_dump())
 
 
-@router.get("/users", response_model=list[AdminUserResponse])
+@router.get("/users", response_model=AdminUserListResponse)
 async def admin_users(
+    page: int = 1,
+    page_size: int = 20,
+    keyword: str | None = None,
+    role: str | None = None,
+    is_frozen: bool | None = None,
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
-) -> list[User]:
-    return await list_users(db)
+) -> AdminUserListResponse:
+    return await list_users(
+        db,
+        page=page,
+        page_size=page_size,
+        keyword=keyword,
+        role=role,
+        is_frozen=is_frozen,
+    )
 
 
 @router.post("/users/{user_id}/freeze", response_model=AdminUserResponse)
@@ -230,10 +243,11 @@ async def admin_delete_platform_knowledge_document(
 async def pending_products(
     page: int = 1,
     page_size: int = 20,
+    keyword: str | None = None,
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    return await get_pending_products_for_audit(db, page=page, page_size=page_size)
+    return await get_pending_products_for_audit(db, page=page, page_size=page_size, keyword=keyword)
 
 
 @router.post("/products/{product_id}/approve")
@@ -321,10 +335,12 @@ async def admin_off_sale_product(
 async def reports(
     page: int = 1,
     page_size: int = 20,
+    status: str | None = None,
+    keyword: str | None = None,
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await list_reports(db, max(page, 1), min(max(page_size, 1), 100))
+    return await list_reports(db, max(page, 1), min(max(page_size, 1), 100), status=status, keyword=keyword)
 
 
 @router.post("/reports/{report_id}/resolve")

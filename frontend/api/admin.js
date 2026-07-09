@@ -1,7 +1,7 @@
 import { request, upload } from './request'
 
 export const adminApi = {
-	users: () => request({ url: '/admin/users', auth: true }),
+	users: params => request({ url: '/admin/users', data: params, auth: true }),
 	freezeUser: (userId, data = {}) => request({
 		url: `/admin/users/${userId}/freeze`,
 		method: 'POST',
@@ -126,7 +126,7 @@ export const adminApi = {
 		auth: true
 	}),
 
-	pendingMerchants: () => request({ url: '/admin/merchants/pending', auth: true }),
+	pendingMerchants: params => request({ url: '/admin/merchants/pending', data: params, auth: true }),
 	approveMerchant: (merchantId, data = {}) => request({
 		url: `/admin/merchants/${merchantId}/approve`,
 		method: 'POST',

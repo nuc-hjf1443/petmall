@@ -176,6 +176,44 @@ async def test_category_product_filter_and_detail_visibility(test_context):
     assert hidden.status_code == 404
 
 
+async def test_other_pet_type_and_brand_filters_match_uncategorized_options(test_context):
+    client: AsyncClient = test_context["client"]
+    ids = await seed_catalog(test_context["session_factory"])
+
+    async with test_context["session_factory"]() as session:
+        other_product = Product(
+            merchant_id=1003,
+            category_id=ids["cat_food_id"],
+            title="Bird Mineral Snack",
+            price=399,
+            stock=8,
+            status=ProductStatus.ON_SALE.value,
+            brand="AcmePet",
+            description="mineral snack for birds",
+            applicable_pet_type="鸟",
+        )
+        session.add(other_product)
+        await session.commit()
+        await session.refresh(other_product)
+        other_product_id = other_product.id
+
+    other_pet_type = await client.get("/products", params={"pet_type": "其他"})
+    assert other_pet_type.status_code == 200
+    assert [item["id"] for item in other_pet_type.json()["items"]] == [other_product_id]
+
+    other_brand = await client.get("/products", params={"brand_keyword": "其他"})
+    assert other_brand.status_code == 200
+    assert [item["id"] for item in other_brand.json()["items"]] == [other_product_id]
+
+    combined = await client.get(
+        "/products",
+        params={"pet_type": "其他", "brand_keyword": "其他"},
+    )
+    assert combined.status_code == 200
+    assert combined.json()["total"] == 1
+    assert combined.json()["items"][0]["id"] == other_product_id
+
+
 async def test_product_sales_newest_and_price_sort(test_context):
     client: AsyncClient = test_context["client"]
     ids = await seed_catalog(test_context["session_factory"])
