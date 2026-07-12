@@ -888,6 +888,90 @@ async def test_guide_agent_generic_request_does_not_use_session_default_pet(
     assert active["resolved_pet_id"] is None
 
 
+async def test_guide_agent_ignores_stale_frontend_summary_when_switching_dog_to_cat(
+    test_context,
+    strong_password,
+    monkeypatch,
+):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    await register_user(client, cache, "13960000021", strong_password)
+    token = await login_user(client, "13960000021", strong_password)
+    await create_dog_pet(client, token)
+
+    service_module = __import__("services.guide_agent_service", fromlist=["get_pet_detail_summary"])
+    original_get_summary = service_module.get_pet_detail_summary
+    loaded_pet_ids: list[int] = []
+
+    async def tracked_get_summary(db, user_id, pet_id):
+        loaded_pet_ids.append(pet_id)
+        return await original_get_summary(db, user_id, pet_id)
+
+    async def empty_retrieve_private_knowledge(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("services.guide_agent_service.get_pet_detail_summary", tracked_get_summary)
+    monkeypatch.setattr(
+        "services.guide_agent_service.retrieve_private_knowledge",
+        empty_retrieve_private_knowledge,
+    )
+    created = await client.post(
+        "/agents/guide/sessions",
+        headers=auth_headers(token),
+        json={"title": "dog to cat"},
+    )
+    session_id = created.json()["id"]
+    first = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "给我的可乐推荐一些主粮"},
+    )
+    assert first.status_code == 200, first.text
+    assert len(loaded_pet_ids) == 1
+
+    captured: dict[str, object] = {}
+
+    async def capture_second_workflow(**kwargs):
+        captured.update(kwargs)
+        return {
+            "answer": "需要先确认具体用品品类。",
+            "recommendations": [],
+            "references": None,
+            "next_questions": [{"key": "category", "question": "想先准备哪类用品？", "options": []}],
+            "requires_user_confirmation": True,
+            "guide_state": kwargs["guide_state"],
+        }
+
+    monkeypatch.setattr("services.guide_agent_service.run_guide_agent_workflow", capture_second_workflow)
+    wrapped_content = (
+        "用户问题：幼猫刚到家，需要准备哪些用品？\n"
+        "左侧需求摘要：\n"
+        "用途：主粮\n"
+        "其他：宠物：可乐\n"
+        "请同时依据用户问题和左侧需求摘要推荐真实在售商品。"
+    )
+    second = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": wrapped_content},
+    )
+    assert second.status_code == 200, second.text
+    body = second.json()
+    active = body["guide_state"]["active_request"]
+    assert len(loaded_pet_ids) == 1
+    assert body["user_message"]["content"] == "幼猫刚到家，需要准备哪些用品？"
+    assert active["relation_to_previous"] == "new"
+    assert active["subject_scope"] == "generic_pet"
+    assert active["profile_policy"] == "forbidden"
+    assert active["resolved_pet_id"] is None
+    assert active["slots"]["pet_type"] == "cat"
+    assert captured["pet_summary"] is None
+    assert captured["history"] == []
+    assert captured["history_summary"] == ""
+    assert "可乐" not in body["assistant_message"]["content"]
+    assert "宠物档案" not in body["assistant_message"]["content"]
+
+
 async def test_guide_graph_interrupts_and_resumes_same_request():
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.types import Command

@@ -10,45 +10,6 @@
 					</view>
 				</view>
 				<button class="new-chat" @click="reset">＋ 新建导购</button>
-				<view v-if="pets.length" class="pet-picker-card">
-					<view class="panel-heading">
-						<text>当前宠物</text>
-					</view>
-					<picker :range="petPickerOptions" range-key="label" :value="selectedPetIndex" @change="selectPet">
-						<view class="pet-picker-value">{{ selectedPetName }}</view>
-					</picker>
-				</view>
-				<view class="summary-card">
-					<view class="panel-heading">
-						<text>我的需求摘要</text>
-						<text class="panel-action" @click="toggleSummaryEdit">{{ summaryEditing ? '完成' : '修改' }}</text>
-					</view>
-					<view v-for="item in summaryRows" :key="item.key" class="summary-row">
-						<text class="summary-icon">{{ item.icon }}</text>
-						<text class="summary-label">{{ item.label }}</text>
-						<input
-							v-if="summaryEditing"
-							v-model="demandSummary[item.key]"
-							class="summary-input"
-							:placeholder="item.placeholder"
-							:maxlength="item.maxlength"
-							:focus="summaryFocusKey === item.key"
-						/>
-						<text v-else class="summary-value">{{ summaryValue(item.key) }}</text>
-					</view>
-					<view v-if="showMoreDemand" class="more-demand-panel">
-						<textarea
-							v-model="demandSummary.other"
-							:focus="moreDemandFocus"
-							auto-height
-							maxlength="160"
-							placeholder="例如：肠胃敏感、希望小颗粒、不要鸡肉、适合出门携带"
-						/>
-					</view>
-					<button class="more-demand" @click="toggleMoreDemand">
-						{{ showMoreDemand ? '收起补充需求' : '＋ 补充更多需求' }}
-					</button>
-				</view>
 				<view class="history-card">
 					<view class="panel-heading">
 						<text>历史对话</text>
@@ -142,7 +103,7 @@
 
 <script>
 import AppShell from '../../components/AppShell.vue'
-import { aiApi, assetUrl, petApi } from '../../api'
+import { aiApi, assetUrl } from '../../api'
 
 export default {
 	components: { AppShell },
@@ -155,30 +116,10 @@ export default {
 			guideState: null,
 			nextQuestions: [],
 			requiresUserConfirmation: false,
-			pets: [],
-			selectedPetId: null,
 			historySessions: [],
 			loadingHistory: false,
-			summaryEditing: false,
-			summaryFocusKey: '',
-			showMoreDemand: false,
-			moreDemandFocus: false,
 			sending: false,
 			scrollTarget: '',
-			demandSummary: {
-				budget: '待补充',
-				purpose: '待补充',
-				preference: '待补充',
-				brand: '品牌不限',
-				other: '待补充'
-			},
-			summaryRows: [
-				{ key: 'budget', label: '预算', icon: '¥', placeholder: '待补充', maxlength: 24 },
-				{ key: 'purpose', label: '用途', icon: '用', placeholder: '待补充', maxlength: 32 },
-				{ key: 'preference', label: '偏好', icon: '偏', placeholder: '待补充', maxlength: 48 },
-				{ key: 'brand', label: '品牌', icon: '牌', placeholder: '品牌不限', maxlength: 32 },
-				{ key: 'other', label: '其他', icon: '其', placeholder: '补充更多需求', maxlength: 80 }
-			],
 			suggestions: [
 				'3 岁柯基，需要低敏狗粮，预算 300 元',
 				'幼猫刚到家，需要准备哪些用品？',
@@ -186,36 +127,10 @@ export default {
 			]
 		}
 	},
-	computed: {
-		petPickerOptions() {
-			return [
-				{ id: null, label: '不指定宠物' },
-				...this.pets.map(pet => ({ id: pet.id, label: `${pet.name} · ${this.petTypeText(pet.pet_type)}` }))
-			]
-		},
-		selectedPetIndex() {
-			const index = this.petPickerOptions.findIndex(item => item.id === this.selectedPetId)
-			return index >= 0 ? index : 0
-		},
-		selectedPetName() {
-			const option = this.petPickerOptions[this.selectedPetIndex]
-			return (option && option.label) || '不指定宠物'
-		}
-	},
 	mounted() {
-		this.loadPets()
 		this.loadHistory()
 	},
 	methods: {
-		emptySummary() {
-			return {
-				budget: '待补充',
-				purpose: '待补充',
-				preference: '待补充',
-				brand: '品牌不限',
-				other: '待补充'
-			}
-		},
 		reset() {
 			this.sessionId = null
 			this.input = ''
@@ -224,34 +139,6 @@ export default {
 			this.guideState = null
 			this.nextQuestions = []
 			this.requiresUserConfirmation = false
-			this.demandSummary = this.emptySummary()
-			this.summaryEditing = false
-			this.summaryFocusKey = ''
-			this.showMoreDemand = false
-			this.moreDemandFocus = false
-		},
-		async loadPets() {
-			if (!uni.getStorageSync('access_token')) return
-			try {
-				const response = await petApi.list()
-				this.pets = Array.isArray(response) ? response : []
-			} catch (error) {
-				this.pets = []
-			}
-		},
-		selectPet(event) {
-			const index = Number(event.detail.value || 0)
-			const option = this.petPickerOptions[index] || this.petPickerOptions[0]
-			this.selectedPetId = option.id
-			this.sessionId = null
-			this.messages = []
-			this.recommendations = []
-			this.nextQuestions = []
-			this.guideState = null
-		},
-		petTypeText(type) {
-			const map = { dog: '狗', cat: '猫' }
-			return map[type] || type || '宠物'
 		},
 		answerGuideOption(option) {
 			this.input = option.value || option.label || ''
@@ -264,28 +151,6 @@ export default {
 		focusInput() {
 			this.input = this.input || ''
 		},
-		toggleSummaryEdit() {
-			this.summaryEditing = !this.summaryEditing
-			this.summaryFocusKey = ''
-			if (this.summaryEditing) {
-				this.$nextTick(() => {
-					this.summaryFocusKey = 'budget'
-				})
-			}
-		},
-		toggleMoreDemand() {
-			this.showMoreDemand = !this.showMoreDemand
-			this.moreDemandFocus = false
-			if (this.showMoreDemand) {
-				this.summaryEditing = true
-				if (!this.normalizeDemandValue(this.demandSummary.other)) {
-					this.demandSummary.other = ''
-				}
-				this.$nextTick(() => {
-					this.moreDemandFocus = true
-				})
-			}
-		},
 		async send() {
 			const content = this.input.trim()
 			if (!content || this.sending) return
@@ -293,8 +158,6 @@ export default {
 				return uni.navigateTo({ url: '/pages/auth/login' })
 			}
 			this.input = ''
-			this.mergeParsedDemand(content)
-			const guideContent = this.buildGuideContent(content)
 			this.messages.push({ role: 'user', content })
 			this.nextQuestions = []
 			this.sending = true
@@ -302,10 +165,9 @@ export default {
 			try {
 				if (!this.sessionId) {
 					const payload = { title: this.makeSessionTitle(content) }
-					if (this.selectedPetId) payload.pet_id = this.selectedPetId
 					this.sessionId = (await aiApi.createGuideSession(payload)).id
 				}
-				const response = await aiApi.sendGuideMessage(this.sessionId, { content: guideContent, limit: 5 })
+				const response = await aiApi.sendGuideMessage(this.sessionId, { content, limit: 5 })
 				this.recommendations = response.recommendations || []
 				this.messages.push({
 					...response.assistant_message,
@@ -314,7 +176,6 @@ export default {
 				this.guideState = response.guide_state || null
 				this.nextQuestions = response.next_questions || []
 				this.requiresUserConfirmation = !!response.requires_user_confirmation
-				this.applyGuideState(this.guideState)
 				this.loadHistory()
 			} catch (error) {
 				this.messages.push({ role: 'assistant', content: `暂时无法生成推荐：${error.message}` })
@@ -341,14 +202,11 @@ export default {
 				const session = await aiApi.session(item.id)
 				this.sessionId = session.id
 				const messages = (session.messages || []).slice().sort((a, b) => a.id - b.id)
-				const latestUserMessage = messages.filter(message => message.role === 'user').slice(-1)[0]
-				this.demandSummary = latestUserMessage ? this.parseDemand(latestUserMessage.content) : this.emptySummary()
 				this.recommendations = await aiApi.guideRecommendations(session.id)
 				this.messages = this.attachRecommendationsToLatestAssistant(messages, this.recommendations)
 				this.guideState = null
 				this.nextQuestions = []
 				this.requiresUserConfirmation = false
-				this.selectedPetId = session.pet_id || null
 				this.scroll()
 			} catch (error) {
 				uni.showToast({ title: '历史会话加载失败', icon: 'none' })
@@ -398,85 +256,6 @@ export default {
 		},
 		detail(id) {
 			uni.navigateTo({ url: `/pages/mall/detail?id=${id}` })
-		},
-		parseDemand(content) {
-			const text = content || ''
-			const budgetMatch = text.match(/(?:预算|价格|价位)?\s*(\d{2,6})\s*(?:元|块|rmb|RMB)?/)
-			const purposeKeywords = ['猫粮', '狗粮', '零食', '玩具', '用品', '牵引', '猫砂', '狗窝', '猫窝', '营养', '洗护']
-			const preferenceKeywords = ['低敏', '耐咬', '轻便', '便携', '高蛋白', '无谷', '除臭', '屏幕清晰', '续航', '护眼']
-			const purpose = purposeKeywords.find(keyword => text.includes(keyword))
-			const preferences = preferenceKeywords.filter(keyword => text.includes(keyword)).slice(0, 3)
-			return {
-				budget: budgetMatch ? `${budgetMatch[1]} 元` : '待补充',
-				purpose: purpose || '待补充',
-				preference: preferences.length ? preferences.join('、') : '待补充',
-				brand: '品牌不限',
-				other: text.length > 18 ? `${text.slice(0, 18)}...` : (text || '待补充')
-			}
-		},
-		normalizeDemandValue(value) {
-			const text = String(value || '').trim()
-			return ['待补充', '补充更多需求'].includes(text) ? '' : text
-		},
-		summaryValue(key) {
-			return this.normalizeDemandValue(this.demandSummary[key]) || (key === 'brand' ? '品牌不限' : '待补充')
-		},
-		mergeParsedDemand(content) {
-			const parsed = this.parseDemand(content)
-			Object.keys(parsed).forEach(key => {
-				if (!this.normalizeDemandValue(this.demandSummary[key])) {
-					this.demandSummary[key] = parsed[key]
-				}
-			})
-		},
-		applyGuideState(state) {
-			const slots = (state && state.slots) || {}
-			const nextSummary = { ...this.demandSummary }
-			if (slots.budget) nextSummary.budget = `${slots.budget} 元`
-			if (slots.category) nextSummary.purpose = this.categoryText(slots.category)
-			if (Array.isArray(slots.preferences) && slots.preferences.length) {
-				nextSummary.preference = slots.preferences.join('、')
-			}
-			if (slots.pet_name) {
-				nextSummary.other = `宠物：${slots.pet_name}`
-			}
-			this.demandSummary = nextSummary
-			if (slots.pet_id) this.selectedPetId = slots.pet_id
-		},
-		categoryText(category) {
-			const map = {
-				food: '主粮',
-				freeze_dried: '冻干',
-				snack: '零食',
-				toy: '玩具',
-				bath: '洗护',
-				litter: '猫砂',
-				leash: '牵引'
-			}
-			return map[category] || category
-		},
-		buildGuideContent(question) {
-			const labels = {
-				budget: '预算',
-				purpose: '用途',
-				preference: '偏好',
-				brand: '品牌',
-				other: '其他'
-			}
-			const summaryLines = Object.keys(labels)
-				.map(key => {
-					const value = this.normalizeDemandValue(this.demandSummary[key])
-					if (!value) return ''
-					return `${labels[key]}：${value}`
-				})
-				.filter(Boolean)
-			if (!summaryLines.length) return question
-			return [
-				`用户问题：${question}`,
-				'左侧需求摘要：',
-				...summaryLines,
-				'请同时依据用户问题和左侧需求摘要推荐真实在售商品。'
-			].join('\n')
 		},
 		makeSessionTitle(content) {
 			return content.length > 18 ? `${content.slice(0, 18)}...` : content
@@ -592,42 +371,17 @@ export default {
 	font-size: 12px;
 	line-height: 1;
 }
-.pet-picker-card {
-	width: 100%;
-	margin-bottom: 12px;
-	padding: 12px 14px;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	background: var(--color-surface);
-	box-shadow: var(--shadow-card);
-}
-.pet-picker-value {
-	overflow: hidden;
-	height: 34px;
-	padding: 0 12px;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	background: #fffaf6;
-	color: var(--color-text);
-	font-size: 12px;
-	line-height: 34px;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.summary-card,
 .history-card,
 .product-card {
 	border: 1px solid var(--color-border);
 	background: var(--color-surface);
 	box-shadow: var(--shadow-card);
 }
-.summary-card,
 .history-card {
 	width: 100%;
 	padding: 14px;
 	border-radius: 8px;
 }
-.summary-card { flex: none; }
 .history-card {
 	display: flex;
 	flex: none;
@@ -648,86 +402,6 @@ export default {
 	color: var(--color-primary);
 	font-size: 10px;
 	font-weight: 600;
-}
-.summary-row {
-	display: grid;
-	grid-template-columns: 20px 38px minmax(0, 1fr);
-	align-items: center;
-	gap: 5px;
-	margin-top: 7px;
-	padding: 8px;
-	border: 1px solid transparent;
-	border-radius: 8px;
-	background: #fffaf6;
-	font-size: 11px;
-}
-.summary-row:focus-within {
-	border-color: rgba(255, 116, 23, .28);
-	background: #fff;
-}
-.summary-icon {
-	display: flex;
-	width: 18px;
-	height: 18px;
-	align-items: center;
-	justify-content: center;
-	border-radius: 6px;
-	background: var(--color-primary-soft);
-	color: var(--color-primary);
-	font-size: 10px;
-	font-weight: 800;
-}
-.summary-label {
-	color: var(--color-text);
-	font-weight: 700;
-	white-space: nowrap;
-}
-.summary-value {
-	overflow: hidden;
-	min-width: 0;
-	color: var(--color-text-secondary);
-	text-align: right;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.summary-input {
-	width: 100%;
-	min-width: 0;
-	height: 22px;
-	padding: 0;
-	border: 0;
-	outline: 0;
-	background: transparent;
-	color: var(--color-text-secondary);
-	text-align: right;
-	font-size: 11px;
-	line-height: 22px;
-}
-.summary-input::placeholder { color: #b9ada3; }
-.more-demand-panel {
-	margin-top: 8px;
-	padding: 9px;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	background: #fffaf6;
-}
-.more-demand-panel textarea {
-	width: 100%;
-	min-height: 64px;
-	color: var(--color-text);
-	font-size: 11px;
-	line-height: 1.6;
-}
-.more-demand {
-	height: 32px;
-	margin: 10px 0 0;
-	padding: 0;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	background: var(--color-primary-soft);
-	color: var(--color-primary);
-	font-size: 11px;
-	line-height: 32px;
 }
 .history-empty {
 	padding: 12px;

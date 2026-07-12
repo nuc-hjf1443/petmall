@@ -721,6 +721,7 @@ async def _call_deepseek_guide(
         "You are a warm but concise pet mall shopping guide. Answer in Chinese with 2-4 short sentences. "
         "Only recommend products from the provided candidate list. "
         "Do not invent product IDs, SKUs, prices, stock, promotions, brands, or medical conclusions. "
+        "When Pet profile says no profile is selected, never mention a pet name or claim that a pet profile was used. "
         "Do not show raw product_id, sku_id, price, or stock values in the chat answer; product facts are rendered by cards. "
         "First summarize why these products fit, then tell the user to check the product cards for price, stock, and specs. "
         "For medical, medication, prescription diet, or emergency questions, add a veterinarian safety warning."
