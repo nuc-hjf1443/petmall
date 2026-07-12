@@ -1,4 +1,4 @@
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import case, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -351,12 +351,21 @@ async def search_sale_products(
     if query.strip():
         pattern = f"%{query.strip()}%"
         filters.append(or_(Product.title.ilike(pattern), Product.description.ilike(pattern)))
+    pet_type_order = None
     if pet_type:
+        universal_values = ("universal", "cat_dog", "猫犬通用", "猫狗通用")
         filters.append(
             or_(
                 Product.applicable_pet_type == pet_type.strip(),
                 Product.applicable_pet_type.is_(None),
+                Product.applicable_pet_type.in_(universal_values),
             )
+        )
+        pet_type_order = case(
+            (Product.applicable_pet_type == pet_type.strip(), 0),
+            (Product.applicable_pet_type.in_(universal_values), 1),
+            (Product.applicable_pet_type.is_(None), 2),
+            else_=3,
         )
     result = await db.execute(
         select(Product)
@@ -373,7 +382,11 @@ async def search_sale_products(
             ProductSku.stock > 0,
         )
         .distinct()
-        .order_by(Product.updated_at.desc(), Product.id.desc())
+        .order_by(
+            *([pet_type_order] if pet_type_order is not None else []),
+            Product.updated_at.desc(),
+            Product.id.desc(),
+        )
         .limit(limit)
     )
     return list(result.scalars().all())

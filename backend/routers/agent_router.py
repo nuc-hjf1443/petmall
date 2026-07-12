@@ -12,6 +12,7 @@ from schemas.agent_schema import (
     AgentSessionResponse,
     GuideAnswerResponse,
     GuideMessageCreate,
+    GuideRefineCreate,
     GuideRecommendationResponse,
     GuideSessionCreate,
     QaAnswerResponse,
@@ -20,6 +21,7 @@ from schemas.agent_schema import (
 )
 from services.guide_agent_service import (
     create_guide_session,
+    get_guide_timeline,
     list_latest_guide_recommendations,
     send_guide_message,
 )
@@ -178,6 +180,28 @@ async def send_guide_agent_message(
     )
 
 
+@router.post("/guide/sessions/{session_id}/refine", response_model=GuideAnswerResponse)
+async def refine_guide_agent_recommendation(
+    session_id: int,
+    payload: GuideRefineCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GuideAnswerResponse:
+    content = payload.content.strip()
+    if not any(marker in content for marker in ("不满意", "再便宜", "不要", "换成", "调整")):
+        content = f"不满意当前推荐，我希望调整：{content}"
+    result = await send_guide_message(db, current_user, session_id, content, payload.limit)
+    return GuideAnswerResponse(
+        session_id=session_id,
+        user_message=result[0],
+        assistant_message=result[1],
+        recommendations=result[2],
+        guide_state=result[3],
+        next_questions=result[4],
+        requires_user_confirmation=result[5],
+    )
+
+
 @router.get("/guide/sessions/{session_id}/recommendations", response_model=list[GuideRecommendationResponse])
 async def list_guide_session_recommendations(
     session_id: int,
@@ -185,6 +209,15 @@ async def list_guide_session_recommendations(
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
     return await list_latest_guide_recommendations(db, current_user, session_id)
+
+
+@router.get("/guide/sessions/{session_id}/timeline")
+async def get_guide_session_timeline(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await get_guide_timeline(db, current_user, session_id)
 
 
 @router.get("/sessions/{session_id}", response_model=AgentSessionResponse)

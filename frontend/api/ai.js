@@ -51,6 +51,16 @@ export const aiApi = {
 	guideRecommendations: sessionId => request({
 		url: `/agents/guide/sessions/${sessionId}/recommendations`,
 		auth: true
+	}),
+	refineGuideRecommendation: (sessionId, data) => request({
+		url: `/agents/guide/sessions/${sessionId}/refine`,
+		method: 'POST',
+		data,
+		auth: true
+	}),
+	guideTimeline: sessionId => request({
+		url: `/agents/guide/sessions/${sessionId}/timeline`,
+		auth: true
 	})
 }
 
@@ -65,8 +75,10 @@ export const agentApi = {
 	sendQaMessage: aiApi.sendQaMessage,
 	createGuideSession: aiApi.createGuideSession,
 	sendGuideMessage: aiApi.sendGuideMessage,
+	refineGuideRecommendation: aiApi.refineGuideRecommendation,
 	sessions: aiApi.sessions,
 	deleteSession: aiApi.deleteSession,
 	guideRecommendations: aiApi.guideRecommendations,
+	guideTimeline: aiApi.guideTimeline,
 	session: aiApi.session
 }

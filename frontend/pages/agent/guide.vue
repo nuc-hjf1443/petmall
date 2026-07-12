@@ -72,6 +72,12 @@
 									<button class="detail-btn" @click="detail(item.product_id)">查看详情</button>
 								</view>
 							</view>
+							<button
+								v-if="isLatestRecommendationMessage(index)"
+								class="refine-btn"
+								:disabled="sending"
+								@click="refineRecommendation"
+							>不满意？补充要求后重新推荐</button>
 						</view>
 					</view>
 					<view v-if="nextQuestions.length" class="question-panel">
@@ -119,6 +125,7 @@ export default {
 			historySessions: [],
 			loadingHistory: false,
 			sending: false,
+			refineMode: false,
 			scrollTarget: '',
 			suggestions: [
 				'3 岁柯基，需要低敏狗粮，预算 300 元',
@@ -139,6 +146,7 @@ export default {
 			this.guideState = null
 			this.nextQuestions = []
 			this.requiresUserConfirmation = false
+			this.refineMode = false
 		},
 		answerGuideOption(option) {
 			this.input = option.value || option.label || ''
@@ -167,7 +175,10 @@ export default {
 					const payload = { title: this.makeSessionTitle(content) }
 					this.sessionId = (await aiApi.createGuideSession(payload)).id
 				}
-				const response = await aiApi.sendGuideMessage(this.sessionId, { content, limit: 5 })
+				const response = this.refineMode
+					? await aiApi.refineGuideRecommendation(this.sessionId, { content, limit: 5 })
+					: await aiApi.sendGuideMessage(this.sessionId, { content, limit: 5 })
+				this.refineMode = false
 				this.recommendations = response.recommendations || []
 				this.messages.push({
 					...response.assistant_message,
@@ -198,12 +209,11 @@ export default {
 		},
 		async openHistory(item) {
 			if (this.sending) return
+			this.refineMode = false
 			try {
-				const session = await aiApi.session(item.id)
-				this.sessionId = session.id
-				const messages = (session.messages || []).slice().sort((a, b) => a.id - b.id)
-				this.recommendations = await aiApi.guideRecommendations(session.id)
-				this.messages = this.attachRecommendationsToLatestAssistant(messages, this.recommendations)
+				const timeline = await aiApi.guideTimeline(item.id)
+				this.sessionId = item.id
+				this.messages = (timeline.messages || []).slice().sort((a, b) => a.id - b.id)
 				this.guideState = null
 				this.nextQuestions = []
 				this.requiresUserConfirmation = false
@@ -243,16 +253,16 @@ export default {
 			const match = String(message.content || '').match(/^用户问题：(.+?)(?:\n左侧需求摘要：|$)/s)
 			return match ? match[1].trim() : message.content
 		},
-		attachRecommendationsToLatestAssistant(messages, recommendations = []) {
-			const nextMessages = messages.map(message => ({ ...message }))
-			const latestAssistantIndex = nextMessages.map(message => message.role).lastIndexOf('assistant')
-			if (latestAssistantIndex >= 0 && recommendations.length) {
-				nextMessages[latestAssistantIndex].recommendations = recommendations
-			}
-			return nextMessages
-		},
 		messageRecommendations(message) {
 			return Array.isArray(message.recommendations) ? message.recommendations : []
+		},
+		isLatestRecommendationMessage(index) {
+			return !this.messages.slice(index + 1).some(message => this.messageRecommendations(message).length)
+		},
+		refineRecommendation() {
+			this.refineMode = true
+			this.input = '不满意当前推荐，我希望'
+			this.$nextTick(() => this.focusInput())
 		},
 		detail(id) {
 			uni.navigateTo({ url: `/pages/mall/detail?id=${id}` })
@@ -707,6 +717,18 @@ export default {
 	background: #fff;
 	color: var(--color-primary);
 	font-size: 11px;
+	line-height: 32px;
+}
+.refine-btn {
+	width: auto;
+	height: 34px;
+	margin: 12px 0 0;
+	padding: 0 16px;
+	border: 1px solid var(--color-primary);
+	border-radius: 17px;
+	background: #fff;
+	color: var(--color-primary);
+	font-size: 12px;
 	line-height: 32px;
 }
 .composer {
