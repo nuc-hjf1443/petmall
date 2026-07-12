@@ -43,6 +43,8 @@ class GuideWorkflowState(TypedDict, total=False):
     pet_summary: dict[str, Any] | None
     products: list[dict[str, Any]]
     guide_state: dict[str, Any]
+    request_id: str
+    use_interrupt: bool
     next_questions: list[dict[str, Any]]
     requires_user_confirmation: bool
     answer: str
@@ -226,6 +228,7 @@ def get_agent_memory_status() -> dict[str, Any]:
         "dependency_available": dependency_available,
         "setup_on_start": settings.agent_memory_setup_on_start,
         "thread_id_pattern": "qa_session:{session_id}",
+        "guide_thread_id_pattern": "guide_session:{session_id}:request:{request_id}",
     }
 
 
@@ -307,6 +310,15 @@ def _guide_missing_slots(slots: dict[str, Any]) -> list[str]:
 
 def _build_guide_next_questions(missing_slots: list[str]) -> list[dict[str, Any]]:
     question_map = {
+        "subject": {
+            "key": "subject",
+            "question": "这次是给你自己的宠物、别人的宠物，还是只想看通用商品？",
+            "options": [
+                {"label": "我的宠物", "value": "给我家的宠物买"},
+                {"label": "别人的宠物", "value": "给朋友的宠物买"},
+                {"label": "通用推荐", "value": "只看通用推荐"},
+            ],
+        },
         "pet": {
             "key": "pet",
             "question": "\u8bf7\u5148\u544a\u8bc9\u6211\u8981\u7ed9\u54ea\u4e2a\u5ba0\u7269\u4e70\uff1f",
@@ -360,7 +372,11 @@ async def _parse_guide_request_node(state: GuideWorkflowState) -> GuideWorkflowS
         if pet_summary.get("pet_type"):
             slots["pet_type"] = pet_summary.get("pet_type")
 
-    missing_slots = _guide_missing_slots(slots)
+    active_request = guide_state.get("active_request")
+    if isinstance(active_request, dict) and isinstance(active_request.get("missing_slots"), list):
+        missing_slots = list(active_request["missing_slots"])
+    else:
+        missing_slots = _guide_missing_slots(slots)
     guide_state["slots"] = slots
     guide_state["missing_slots"] = missing_slots
     guide_state["stage"] = "clarifying" if missing_slots else "recommending"
@@ -377,6 +393,18 @@ async def _ask_guide_clarification_node(state: GuideWorkflowState) -> GuideWorkf
     next_questions = _build_guide_next_questions(missing_slots)
     risk_level = state.get("risk_level", "normal")
     answer = _build_guide_clarification_answer(next_questions)
+    if state.get("use_interrupt"):
+        from langgraph.types import interrupt
+
+        resumed_state = interrupt(
+            {
+                "request_id": state.get("request_id"),
+                "questions": next_questions,
+                "missing_slots": missing_slots,
+            }
+        )
+        if isinstance(resumed_state, dict):
+            return resumed_state
     return {
         **state,
         "answer": _enforce_guide_safety(answer, risk_level),
@@ -428,7 +456,7 @@ async def _generate_guide_answer_node(state: GuideWorkflowState) -> GuideWorkflo
     }
 
 
-def _build_guide_graph():
+def _build_guide_graph(*, use_interrupt: bool = False):
     from langgraph.graph import END, StateGraph
 
     graph = StateGraph(GuideWorkflowState)
@@ -444,7 +472,7 @@ def _build_guide_graph():
             "generate_answer": "generate_answer",
         },
     )
-    graph.add_edge("ask_clarification", END)
+    graph.add_edge("ask_clarification", "parse_request" if use_interrupt else END)
     graph.add_edge("generate_answer", END)
     return graph
 
@@ -452,6 +480,69 @@ def _build_guide_graph():
 @lru_cache(maxsize=1)
 def _compile_guide_graph_without_checkpointer():
     return _build_guide_graph().compile()
+
+
+async def _run_guide_graph_with_postgres_checkpointer(
+    state: GuideWorkflowState,
+    *,
+    session_id: int,
+    request_id: str,
+    resume_from_interrupt: bool,
+) -> GuideWorkflowState | None:
+    settings = get_settings()
+    if not settings.agent_memory_postgres_dsn:
+        return None
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from langgraph.types import Command
+    except ImportError:
+        logger.warning("LangGraph postgres checkpointer dependency is not installed")
+        return None
+
+    thread_id = f"guide_session:{session_id}:request:{request_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+    checkpoint_state = {**state, "request_id": request_id, "use_interrupt": True}
+    try:
+        async with AsyncPostgresSaver.from_conn_string(settings.agent_memory_postgres_dsn) as checkpointer:
+            if settings.agent_memory_setup_on_start:
+                await checkpointer.setup()
+            graph = _build_guide_graph(use_interrupt=True).compile(checkpointer=checkpointer)
+            graph_input: GuideWorkflowState | Command
+            graph_input = Command(resume=checkpoint_state) if resume_from_interrupt else checkpoint_state
+            result = await graph.ainvoke(graph_input, config=config)
+            interrupts = result.get("__interrupt__") if isinstance(result, dict) else None
+            if interrupts:
+                payload = getattr(interrupts[0], "value", {}) or {}
+                questions = list(payload.get("questions") or [])
+                return {
+                    **checkpoint_state,
+                    "answer": _enforce_guide_safety(_build_guide_clarification_answer(questions), state.get("risk_level", "normal")),
+                    "recommendations": [],
+                    "references": None,
+                    "next_questions": questions,
+                    "requires_user_confirmation": True,
+                }
+            return result
+    except Exception as exc:
+        logger.warning("LangGraph postgres checkpoint failed for guide thread %s: %s", thread_id, exc)
+        return None
+
+
+async def delete_guide_checkpoints(session_id: int, request_ids: list[str]) -> None:
+    """Best-effort cleanup; MySQL session deletion must not depend on PostgreSQL health."""
+    settings = get_settings()
+    if not settings.agent_memory_postgres_dsn or not request_ids:
+        return
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    except ImportError:
+        return
+    try:
+        async with AsyncPostgresSaver.from_conn_string(settings.agent_memory_postgres_dsn) as checkpointer:
+            for request_id in dict.fromkeys(request_ids):
+                await checkpointer.adelete_thread(f"guide_session:{session_id}:request:{request_id}")
+    except Exception as exc:
+        logger.warning("Failed to delete guide checkpoints for session %s: %s", session_id, exc)
 
 
 def _first_in_stock_sku(product: dict[str, Any]) -> dict[str, Any] | None:
@@ -705,6 +796,8 @@ async def run_guide_agent_workflow(
     history_summary: str | None = None,
     guide_state: dict[str, Any] | None = None,
     session_id: int | None = None,
+    request_id: str | None = None,
+    resume_from_interrupt: bool = False,
 ) -> GuideWorkflowState:
     product_candidates = products or []
     state: GuideWorkflowState = {
@@ -719,6 +812,15 @@ async def run_guide_agent_workflow(
         "guide_state": guide_state or {},
     }
     try:
+        if session_id is not None and request_id:
+            checkpointed_result = await _run_guide_graph_with_postgres_checkpointer(
+                state,
+                session_id=session_id,
+                request_id=request_id,
+                resume_from_interrupt=resume_from_interrupt,
+            )
+            if checkpointed_result is not None:
+                return checkpointed_result
         graph = _compile_guide_graph_without_checkpointer()
         return await graph.ainvoke(state)
     except Exception as exc:

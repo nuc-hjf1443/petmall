@@ -200,7 +200,9 @@ async def test_guide_agent_recommends_real_products_and_persists_result(
         assert stored.source in {"product_search", "rag_enhanced"}
         assert stored.source_detail
         assert stored.score is not None
-        assert stored.matched_pet_fields is not None
+        assert stored.matched_pet_fields is None
+
+    assert body["guide_state"]["active_request"]["profile_policy"] == "forbidden"
 
     assert recommendation["source"] in {"product_search", "rag_enhanced"}
     assert recommendation["source_detail"]
@@ -549,14 +551,19 @@ async def test_guide_agent_lists_history_and_restores_latest_recommendations(
     cache = test_context["cache"]
     session_factory = test_context["session_factory"]
     ids = await seed_catalog(session_factory)
+    deleted_checkpoint_args: list[tuple[int, list[str]]] = []
 
     async def empty_retrieve_private_knowledge(*args, **kwargs):
         return []
+
+    async def track_checkpoint_delete(session_id, request_ids):
+        deleted_checkpoint_args.append((session_id, request_ids))
 
     monkeypatch.setattr(
         "services.guide_agent_service.retrieve_private_knowledge",
         empty_retrieve_private_knowledge,
     )
+    monkeypatch.setattr("services.qa_agent_service.delete_guide_checkpoints", track_checkpoint_delete)
 
     await register_user(client, cache, "13960000006", strong_password)
     token = await login_user(client, "13960000006", strong_password)
@@ -628,6 +635,9 @@ async def test_guide_agent_lists_history_and_restores_latest_recommendations(
         params={"agent_type": "guide"},
     )
     assert deleted.status_code == 200
+    assert deleted_checkpoint_args
+    assert deleted_checkpoint_args[0][0] == session_id
+    assert deleted_checkpoint_args[0][1][0].startswith("req_")
 
     deleted_history = await client.get(
         "/agents/sessions",
@@ -762,7 +772,168 @@ async def test_guide_agent_matches_pet_name_and_recommends_real_products(
 
     async with session_factory() as session:
         stored_session = await session.get(AgentSession, session_id)
-        assert stored_session.pet_id == pet_id
+        # Name matching resolves only the active request; it must not rewrite the
+        # conversation default pet selected when the session was created.
+        assert stored_session.pet_id is None
+
+
+async def test_guide_agent_switches_to_external_pet_without_loading_owned_profile(
+    test_context,
+    strong_password,
+    monkeypatch,
+):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    await register_user(client, cache, "13960000019", strong_password)
+    token = await login_user(client, "13960000019", strong_password)
+    await create_dog_pet(client, token)
+
+    original_get_summary = __import__(
+        "services.guide_agent_service", fromlist=["get_pet_detail_summary"]
+    ).get_pet_detail_summary
+    loaded_pet_ids: list[int] = []
+
+    async def tracked_get_summary(db, user_id, pet_id):
+        loaded_pet_ids.append(pet_id)
+        return await original_get_summary(db, user_id, pet_id)
+
+    async def empty_retrieve_private_knowledge(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("services.guide_agent_service.get_pet_detail_summary", tracked_get_summary)
+    monkeypatch.setattr(
+        "services.guide_agent_service.retrieve_private_knowledge",
+        empty_retrieve_private_knowledge,
+    )
+
+    created = await client.post(
+        "/agents/guide/sessions",
+        headers=auth_headers(token),
+        json={"title": "switch target"},
+    )
+    session_id = created.json()["id"]
+    first = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "给我的可乐推荐冻干，预算 100 元"},
+    )
+    assert first.status_code == 200, first.text
+    assert len(loaded_pet_ids) == 1
+
+    second = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "再帮朋友三个月的小猫选主粮，预算 200 元"},
+    )
+    assert second.status_code == 200, second.text
+    body = second.json()
+    active = body["guide_state"]["active_request"]
+    assert len(loaded_pet_ids) == 1
+    assert active["subject_scope"] == "external_pet"
+    assert active["profile_policy"] == "forbidden"
+    assert active["resolved_pet_id"] is None
+    assert active["slots"].get("pet_id") is None
+    assert active["slots"]["pet_type"] == "cat"
+
+    third = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "还是给可乐买冻干，预算 80 元"},
+    )
+    assert third.status_code == 200, third.text
+    switched_back = third.json()["guide_state"]["active_request"]
+    assert len(loaded_pet_ids) == 2
+    assert switched_back["relation_to_previous"] == "switch_back"
+    assert switched_back["subject_scope"] == "owned_pet"
+    assert switched_back["resolved_pet_id"] == loaded_pet_ids[0]
+
+
+async def test_guide_agent_generic_request_does_not_use_session_default_pet(
+    test_context,
+    strong_password,
+    monkeypatch,
+):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    await register_user(client, cache, "13960000020", strong_password)
+    token = await login_user(client, "13960000020", strong_password)
+    pet_id = await create_dog_pet(client, token)
+
+    async def forbidden_profile_load(*args, **kwargs):
+        raise AssertionError("generic requests must not load the session default pet profile")
+
+    async def empty_retrieve_private_knowledge(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "services.guide_agent_service.retrieve_private_knowledge",
+        empty_retrieve_private_knowledge,
+    )
+    created = await client.post(
+        "/agents/guide/sessions",
+        headers=auth_headers(token),
+        json={"title": "generic", "pet_id": pet_id},
+    )
+    session_id = created.json()["id"]
+    monkeypatch.setattr("services.guide_agent_service.get_pet_detail_summary", forbidden_profile_load)
+    response = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "推荐一些通用猫玩具，预算 100 元"},
+    )
+    assert response.status_code == 200, response.text
+    active = response.json()["guide_state"]["active_request"]
+    assert active["subject_scope"] == "generic_pet"
+    assert active["profile_policy"] == "forbidden"
+    assert active["resolved_pet_id"] is None
+
+
+async def test_guide_graph_interrupts_and_resumes_same_request():
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.types import Command
+
+    from core.agent_workflow import _build_guide_graph
+
+    request_id = "req_interrupt_test"
+    config = {"configurable": {"thread_id": f"guide_session:1:request:{request_id}"}}
+    graph = _build_guide_graph(use_interrupt=True).compile(checkpointer=InMemorySaver())
+    collecting_state = {
+        "question": "想买点东西",
+        "risk_level": "normal",
+        "request_id": request_id,
+        "use_interrupt": True,
+        "products": [],
+        "guide_state": {
+            "slots": {},
+            "missing_slots": ["pet", "category"],
+            "active_request": {
+                "request_id": request_id,
+                "status": "collecting",
+                "slots": {},
+                "missing_slots": ["pet", "category"],
+            },
+        },
+    }
+    interrupted = await graph.ainvoke(collecting_state, config=config)
+    assert interrupted["__interrupt__"][0].value["request_id"] == request_id
+
+    ready_state = {
+        **collecting_state,
+        "question": "给猫买主粮",
+        "guide_state": {
+            "slots": {"pet_type": "cat", "category": "food"},
+            "missing_slots": [],
+            "active_request": {
+                "request_id": request_id,
+                "status": "searching",
+                "slots": {"pet_type": "cat", "category": "food"},
+                "missing_slots": [],
+            },
+        },
+    }
+    resumed = await graph.ainvoke(Command(resume=ready_state), config=config)
+    assert resumed["requires_user_confirmation"] is False
+    assert resumed["guide_state"]["active_request"]["request_id"] == request_id
 
 
 async def test_guide_agent_does_not_recommend_cat_products_for_dog_request(

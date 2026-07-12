@@ -77,7 +77,7 @@ PETMALL_AGENT_MEMORY_POSTGRES_DSN=postgresql://petmall:change_me@127.0.0.1:5432/
 PETMALL_AGENT_MEMORY_SETUP_ON_START=true
 ```
 
-其中 MySQL 的 `agent_session` / `agent_message` 仍负责用户可见聊天历史；PostgreSQL checkpoint 只用于 AI 养宠助手的 LangGraph 内部状态，QA 会话使用 `qa_session:{session_id}` 作为 `thread_id`。AI 导购模块不接入本次 checkpoint 改动。
+其中 MySQL 的 `agent_session` / `agent_message` 仍负责用户可见聊天历史；PostgreSQL checkpoint 只保存 LangGraph 内部运行状态。QA 会话使用 `qa_session:{session_id}`，AI 导购按活动需求使用 `guide_session:{session_id}:request:{request_id}` 作为 `thread_id`。导购信息不足时会通过 checkpoint 中断，并在用户补充后恢复；未配置 PostgreSQL 时降级为基于 MySQL V2 业务摘要的普通多轮处理。
 
 知识库 worker 独立启动：
 
