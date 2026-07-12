@@ -165,6 +165,15 @@ def assess_guide_risk(content: str) -> str:
     return "normal"
 
 
+def _extract_primary_guide_question(content: str) -> str:
+    """Ignore legacy frontend summaries when making privacy and request-boundary decisions."""
+    text = str(content or "").strip()
+    match = re.search(r"(?:^|\n)用户问题：\s*(.*?)(?:\n左侧需求摘要：|\Z)", text, re.DOTALL)
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    return text
+
+
 def _empty_guide_state() -> dict[str, Any]:
     return {
         "version": GUIDE_STATE_VERSION,
@@ -362,6 +371,11 @@ def _classify_guide_turn(guide_state: dict[str, Any], content: str) -> dict[str,
     current_category = _extract_category(content)
     old_slots = previous.get("slots") if previous else {}
     old_slots = old_slots if isinstance(old_slots, dict) else {}
+    explicit_pet_type_conflict = bool(
+        previous
+        and current_pet_type
+        and old_slots.get("pet_type") not in (None, current_pet_type)
+    )
     context = guide_state.get("conversation_context")
     context = context if isinstance(context, dict) else {}
     last_owned_pet_name = str(context.get("last_owned_pet_name") or "").strip()
@@ -381,6 +395,9 @@ def _classify_guide_turn(guide_state: dict[str, Any], content: str) -> dict[str,
     elif any(marker in text for marker in GENERIC_PET_MARKERS):
         subject_scope = "generic_pet"
         reason = "用户当前轮提出泛化商品需求"
+    elif explicit_pet_type_conflict:
+        subject_scope = "generic_pet"
+        reason = "当前轮宠物类型与上一需求冲突，按新的泛化需求处理"
     elif previous and any(marker in text for marker in ("它", "刚才那只", "还是给")):
         subject_scope = str(previous.get("subject_scope") or "unknown")
         reason = "当前轮使用唯一目标指代，延续活动需求归属"
@@ -407,7 +424,7 @@ def _classify_guide_turn(guide_state: dict[str, Any], content: str) -> dict[str,
         relation = "new"
     if previous and subject_scope != "unknown" and subject_scope != previous.get("subject_scope"):
         relation = "switch_back" if subject_scope == "owned_pet" else "new"
-    if relation != "switch_back" and previous and current_pet_type and old_slots.get("pet_type") not in (None, current_pet_type):
+    if relation != "switch_back" and explicit_pet_type_conflict:
         relation = "new"
     if relation != "switch_back" and previous and current_category and old_slots.get("category") not in (None, current_category):
         relation = "new"
@@ -609,12 +626,19 @@ async def _build_guide_history_context(
     session: AgentSession,
     guide_state: dict[str, Any],
 ) -> tuple[str, list[dict[str, str]]]:
-    messages = sorted(session.messages, key=lambda item: item.id)
+    all_messages = sorted(session.messages, key=lambda item: item.id)
+    active = guide_state.get("active_request")
+    active = active if isinstance(active, dict) else {}
+    try:
+        history_start = max(0, int(active.get("history_start_message_count") or 0))
+    except (TypeError, ValueError):
+        history_start = 0
+    messages = all_messages[history_start:]
     old_messages = messages[:-GUIDE_RECENT_HISTORY_LIMIT]
     recent_messages = messages[-GUIDE_RECENT_HISTORY_LIMIT:]
     recent_history = _messages_to_history(recent_messages)
     context = guide_state.setdefault("conversation_context", {})
-    existing_summary = str(context.get("history_summary") or "")
+    existing_summary = str(active.get("history_summary") or "")
     if not old_messages:
         return existing_summary, recent_history
 
@@ -641,6 +665,7 @@ async def _build_guide_history_context(
             old_history,
             max_chars=GUIDE_HISTORY_SUMMARY_MAX_CHARS,
         )
+    active["history_summary"] = summary
     context["history_summary"] = summary
     guide_state["history_summary"] = summary
     return summary, recent_history
@@ -910,16 +935,20 @@ async def send_guide_message(
     limit: int,
 ) -> tuple[AgentMessage, AgentMessage, list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], bool]:
     session = await get_guide_session(db, user.id, session_id)
-    risk_level = assess_guide_risk(content)
+    primary_content = _extract_primary_guide_question(content)
+    risk_level = assess_guide_risk(primary_content)
     guide_state = _load_guide_state(session)
     previous_active = guide_state.get("active_request")
     previous_request_id = previous_active.get("request_id") if isinstance(previous_active, dict) else None
     was_collecting = isinstance(previous_active, dict) and previous_active.get("status") == "collecting"
-    decision = _merge_guide_state_from_content(guide_state, content)
-    pet_summary = await _resolve_guide_pet_summary(db, user, session, guide_state, content)
+    decision = _merge_guide_state_from_content(guide_state, primary_content)
+    active = guide_state["active_request"]
+    if decision["relation_to_previous"] in {"new", "switch_back"}:
+        active["history_start_message_count"] = len(session.messages)
+        active["history_summary"] = ""
+    pet_summary = await _resolve_guide_pet_summary(db, user, session, guide_state, primary_content)
 
     missing_slots = _missing_guide_slots(guide_state)
-    active = guide_state["active_request"]
     active["missing_slots"] = missing_slots
     active["status"] = "collecting" if missing_slots else "searching"
     _sync_guide_state_mirrors(guide_state)
@@ -941,7 +970,7 @@ async def send_guide_message(
     rag_references = None
     if not missing_slots:
         slots = _guide_slots(guide_state)
-        requested_pet_type = infer_pet_type_from_guide_query(content)
+        requested_pet_type = infer_pet_type_from_guide_query(primary_content)
         pet_type = requested_pet_type or slots.get("pet_type") or (pet_summary.get("pet_type") if pet_summary else None)
         category_term = {
             "food": "主粮",
@@ -953,10 +982,10 @@ async def send_guide_message(
             "leash": "牵引",
         }.get(str(slots.get("category")), "")
         pet_term = "狗" if pet_type == "dog" else "猫" if pet_type == "cat" else ""
-        search_parts = [content]
+        search_parts = [primary_content]
         if requested_pet_type is None and pet_term:
             search_parts.append(pet_term)
-        if _extract_category(content) is None and category_term:
+        if _extract_category(primary_content) is None and category_term:
             search_parts.append(category_term)
         search_content = " ".join(search_parts)
         products = await _search_product_candidates(
@@ -967,11 +996,11 @@ async def send_guide_message(
             session_id=session_id,
             user_id=user.id,
         )
-        rag_context, rag_references = await _retrieve_rag_context(db, user.id, session_id, content)
+        rag_context, rag_references = await _retrieve_rag_context(db, user.id, session_id, primary_content)
 
     history_summary, recent_history = await _build_guide_history_context(session, guide_state)
     workflow_result = await run_guide_agent_workflow(
-        question=content,
+        question=primary_content,
         risk_level=risk_level,
         pet_summary=pet_summary,
         products=products,
@@ -1025,7 +1054,7 @@ async def send_guide_message(
     user_message = AgentMessage(
         session_id=session_id,
         role="user",
-        content=content,
+        content=primary_content,
         risk_level=risk_level,
     )
     assistant_message = AgentMessage(
