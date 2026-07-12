@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from uuid import uuid4
 from typing import Any
 
 from sqlalchemy import select
@@ -100,7 +101,20 @@ PRODUCT_INTENT_TERMS = (
     "\u7275\u5f15",
     "\u8425\u517b",
 )
-GUIDE_STATE_VERSION = 1
+GUIDE_STATE_VERSION = 2
+EXTERNAL_PET_MARKERS = ("朋友", "同事", "别人", "他人", "不是我家", "不是我的", "待领养", "帮人")
+OWNED_PET_MARKERS = ("我家", "我的", "给我", "自家")
+GENERIC_PET_MARKERS = ("通用", "随便推荐", "一般", "通常", "哪种宠物")
+NEW_REQUEST_MARKERS = ("另外", "再问一个", "换一个问题", "接下来", "这次给", "再帮")
+REFINE_REQUEST_MARKERS = ("再便宜", "便宜一点", "不要", "换成", "大包装", "预算改", "预算降", "预算提高")
+PROFILE_SLOT_KEYS = {
+    "breed",
+    "size",
+    "life_stage",
+    "avoid_ingredients",
+    "health_constraints",
+    "diet_preference",
+}
 RAW_PRODUCT_FIELD_PATTERN = re.compile(
     r"\b(product_id|sku_id|price|stock)\s*=|product_id|sku_id|价格\s*\d|库存\s*\d",
     re.IGNORECASE,
@@ -154,10 +168,37 @@ def assess_guide_risk(content: str) -> str:
 def _empty_guide_state() -> dict[str, Any]:
     return {
         "version": GUIDE_STATE_VERSION,
+        "conversation_context": {
+            "history_summary": "",
+            "default_pet_id": None,
+            "last_completed_request_id": None,
+            "request_ids": [],
+            "last_owned_pet_id": None,
+            "last_owned_pet_name": None,
+        },
+        "active_request": None,
+        # Compatibility mirrors for clients released before the V2 state shape.
         "stage": "collecting",
         "slots": {},
         "missing_slots": [],
         "history_summary": "",
+    }
+
+
+def _new_active_request(*, relation: str = "new") -> dict[str, Any]:
+    return {
+        "request_id": f"req_{uuid4().hex}",
+        "status": "classifying",
+        "relation_to_previous": relation,
+        "subject_scope": "unknown",
+        "profile_policy": "ask",
+        "profile_decision_reason": "当前消息尚未明确购买目标",
+        "resolved_pet_id": None,
+        "slots": {},
+        "slot_sources": {},
+        "missing_slots": [],
+        "asked_slot_keys": [],
+        "recommendation_round": 0,
     }
 
 
@@ -173,11 +214,32 @@ def _load_guide_state(session: AgentSession) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         return _empty_guide_state()
     state = _empty_guide_state()
-    state.update(parsed)
-    if not isinstance(state.get("slots"), dict):
-        state["slots"] = {}
-    if not isinstance(state.get("missing_slots"), list):
-        state["missing_slots"] = []
+    if parsed.get("version") == GUIDE_STATE_VERSION:
+        state.update(parsed)
+    else:
+        # Preserve useful V1 data while moving it under the V2 business summary.
+        active = _new_active_request(relation="continue")
+        active["slots"] = dict(parsed.get("slots") or {})
+        active["missing_slots"] = list(parsed.get("missing_slots") or [])
+        active["status"] = "collecting" if active["missing_slots"] else "completed"
+        state["active_request"] = active
+        state["conversation_context"]["history_summary"] = str(parsed.get("history_summary") or "")
+    context = state.get("conversation_context")
+    if not isinstance(context, dict):
+        context = {}
+    context.setdefault("history_summary", "")
+    context.setdefault("default_pet_id", session.pet_id)
+    context.setdefault("last_completed_request_id", None)
+    context.setdefault("request_ids", [])
+    context.setdefault("last_owned_pet_id", None)
+    context.setdefault("last_owned_pet_name", None)
+    if context.get("default_pet_id") is None:
+        context["default_pet_id"] = session.pet_id
+    active = state.get("active_request")
+    if isinstance(active, dict) and active.get("request_id") not in context["request_ids"]:
+        context["request_ids"].append(active.get("request_id"))
+    state["conversation_context"] = context
+    _sync_guide_state_mirrors(state)
     return state
 
 
@@ -185,15 +247,37 @@ def _save_guide_state(session: AgentSession, guide_state: dict[str, Any]) -> Non
     state = _empty_guide_state()
     state.update(guide_state or {})
     state["version"] = GUIDE_STATE_VERSION
+    _sync_guide_state_mirrors(state)
     session.context_summary = json.dumps(state, ensure_ascii=False)
 
 
 def _guide_slots(guide_state: dict[str, Any]) -> dict[str, Any]:
-    slots = guide_state.get("slots")
+    active = guide_state.get("active_request")
+    if not isinstance(active, dict):
+        active = _new_active_request()
+        guide_state["active_request"] = active
+    slots = active.get("slots")
     if not isinstance(slots, dict):
         slots = {}
-        guide_state["slots"] = slots
+        active["slots"] = slots
     return slots
+
+
+def _sync_guide_state_mirrors(guide_state: dict[str, Any]) -> None:
+    context = guide_state.get("conversation_context")
+    guide_state["history_summary"] = str(context.get("history_summary") or "") if isinstance(context, dict) else ""
+    active = guide_state.get("active_request")
+    if not isinstance(active, dict):
+        guide_state["slots"] = {}
+        guide_state["missing_slots"] = []
+        guide_state["stage"] = "collecting"
+        return
+    guide_state["slots"] = active.get("slots") if isinstance(active.get("slots"), dict) else {}
+    guide_state["missing_slots"] = (
+        active.get("missing_slots") if isinstance(active.get("missing_slots"), list) else []
+    )
+    status = str(active.get("status") or "collecting")
+    guide_state["stage"] = "clarifying" if status == "collecting" else "recommending"
 
 
 def _extract_budget(content: str) -> int | None:
@@ -248,36 +332,169 @@ def _extract_preferences(content: str) -> list[str]:
     return [keyword for keyword in preference_keywords if keyword.lower() in lowered][:5]
 
 
-def _merge_guide_state_from_content(guide_state: dict[str, Any], content: str) -> None:
+def _extract_life_stage(content: str) -> str | None:
+    text = (content or "").lower()
+    if any(marker in text for marker in ("幼猫", "幼犬", "三个月", "小猫", "小狗", "kitten", "puppy")):
+        return "young"
+    if any(marker in text for marker in ("老年", "高龄", "senior")):
+        return "senior"
+    if any(marker in text for marker in ("成年", "成猫", "成犬", "adult")):
+        return "adult"
+    return None
+
+
+def _extract_size(content: str) -> str | None:
+    text = content or ""
+    if any(marker in text for marker in ("小型", "小体型", "小号")):
+        return "small"
+    if any(marker in text for marker in ("中型", "中号")):
+        return "medium"
+    if any(marker in text for marker in ("大型", "大体型", "大号")):
+        return "large"
+    return None
+
+
+def _classify_guide_turn(guide_state: dict[str, Any], content: str) -> dict[str, str]:
+    previous = guide_state.get("active_request")
+    previous = previous if isinstance(previous, dict) else None
+    text = (content or "").lower()
+    current_pet_type = infer_pet_type_from_guide_query(content)
+    current_category = _extract_category(content)
+    old_slots = previous.get("slots") if previous else {}
+    old_slots = old_slots if isinstance(old_slots, dict) else {}
+    context = guide_state.get("conversation_context")
+    context = context if isinstance(context, dict) else {}
+    last_owned_pet_name = str(context.get("last_owned_pet_name") or "").strip()
+
+    if any(marker in text for marker in EXTERNAL_PET_MARKERS):
+        subject_scope = "external_pet"
+        reason = "用户当前轮明确表示目标是他人或非本人宠物"
+    elif any(marker in text for marker in OWNED_PET_MARKERS):
+        subject_scope = "owned_pet"
+        reason = "用户当前轮明确表示目标是本人宠物"
+    elif last_owned_pet_name and last_owned_pet_name in content:
+        subject_scope = "owned_pet"
+        reason = "当前轮明确提到此前已校验归属的本人宠物"
+    elif context.get("default_pet_id") and any(marker in text for marker in ("给它", "这只", "它的")):
+        subject_scope = "owned_pet"
+        reason = "当前轮指代会话创建时明确选择的默认宠物"
+    elif any(marker in text for marker in GENERIC_PET_MARKERS):
+        subject_scope = "generic_pet"
+        reason = "用户当前轮提出泛化商品需求"
+    elif previous and any(marker in text for marker in ("它", "刚才那只", "还是给")):
+        subject_scope = str(previous.get("subject_scope") or "unknown")
+        reason = "当前轮使用唯一目标指代，延续活动需求归属"
+    elif previous and (
+        previous.get("status") == "collecting"
+        or any(marker in text for marker in REFINE_REQUEST_MARKERS)
+        or _extract_budget(content) is not None
+        or _extract_life_stage(content) is not None
+        or bool(_extract_preferences(content))
+    ):
+        subject_scope = str(previous.get("subject_scope") or "unknown")
+        reason = "当前轮仅补充或修改活动需求条件，保留已确认目标归属"
+    elif current_pet_type:
+        subject_scope = "generic_pet"
+        reason = "当前轮只提供宠物类型，未要求调用本人档案"
+    else:
+        subject_scope = "unknown"
+        reason = "当前轮无法确定购买目标归属"
+
+    relation = "continue" if previous else "new"
+    if any(marker in text for marker in REFINE_REQUEST_MARKERS) and previous:
+        relation = "refine"
+    if any(marker in text for marker in NEW_REQUEST_MARKERS):
+        relation = "new"
+    if previous and subject_scope != "unknown" and subject_scope != previous.get("subject_scope"):
+        relation = "switch_back" if subject_scope == "owned_pet" else "new"
+    if relation != "switch_back" and previous and current_pet_type and old_slots.get("pet_type") not in (None, current_pet_type):
+        relation = "new"
+    if relation != "switch_back" and previous and current_category and old_slots.get("category") not in (None, current_category):
+        relation = "new"
+
+    if subject_scope in {"external_pet", "generic_pet"}:
+        profile_policy = "forbidden"
+    elif subject_scope == "owned_pet":
+        profile_policy = "required" if current_category in {"food", "snack", "freeze_dried"} else "allowed"
+    else:
+        profile_policy = "ask"
+    return {
+        "relation_to_previous": relation,
+        "subject_scope": subject_scope,
+        "profile_policy": profile_policy,
+        "reason": reason,
+    }
+
+
+def _clear_profile_slots(active: dict[str, Any]) -> None:
+    slots = active.get("slots") if isinstance(active.get("slots"), dict) else {}
+    sources = active.get("slot_sources") if isinstance(active.get("slot_sources"), dict) else {}
+    for key in PROFILE_SLOT_KEYS:
+        if sources.get(key) in {"profile", "session_default"}:
+            slots.pop(key, None)
+            sources.pop(key, None)
+    slots.pop("pet_id", None)
+    active["resolved_pet_id"] = None
+
+
+def _merge_guide_state_from_content(guide_state: dict[str, Any], content: str) -> dict[str, str]:
+    decision = _classify_guide_turn(guide_state, content)
+    previous = guide_state.get("active_request")
+    if decision["relation_to_previous"] in {"new", "switch_back"} or not isinstance(previous, dict):
+        active = _new_active_request(relation=decision["relation_to_previous"])
+        guide_state["active_request"] = active
+        context = guide_state.setdefault("conversation_context", {})
+        request_ids = context.setdefault("request_ids", [])
+        if active["request_id"] not in request_ids:
+            request_ids.append(active["request_id"])
+    else:
+        active = previous
+        active["relation_to_previous"] = decision["relation_to_previous"]
+
+    active["subject_scope"] = decision["subject_scope"]
+    active["profile_policy"] = decision["profile_policy"]
+    active["profile_decision_reason"] = decision["reason"]
+    active["status"] = "classifying"
+    if decision["profile_policy"] == "forbidden":
+        _clear_profile_slots(active)
+
     slots = _guide_slots(guide_state)
-    if pet_type := infer_pet_type_from_guide_query(content):
-        slots["pet_type"] = pet_type
-    if budget := _extract_budget(content):
-        slots["budget"] = budget
-    if category := _extract_category(content):
-        slots["category"] = category
+    sources = active.setdefault("slot_sources", {})
+    extracted = {
+        "pet_type": infer_pet_type_from_guide_query(content),
+        "budget_max": _extract_budget(content),
+        "category": _extract_category(content),
+        "life_stage": _extract_life_stage(content),
+        "size": _extract_size(content),
+    }
+    if any(marker in content for marker in ("预算不限", "不限预算", "价格不限", "直接推荐")):
+        extracted["budget_preference"] = "no_limit"
+    for key, value in extracted.items():
+        if value is not None:
+            slots[key] = value
+            sources[key] = "current_turn"
     preferences = _extract_preferences(content)
     if preferences:
-        existing = [str(item) for item in slots.get("preferences") or [] if str(item).strip()]
-        for preference in preferences:
-            if preference not in existing:
-                existing.append(preference)
-        slots["preferences"] = existing
+        existing = [] if decision["relation_to_previous"] == "new" else list(slots.get("preferences") or [])
+        slots["preferences"] = list(dict.fromkeys([*existing, *preferences]))
+        sources["preferences"] = "current_turn"
+    _sync_guide_state_mirrors(guide_state)
+    return decision
 
 
 def _missing_guide_slots(guide_state: dict[str, Any]) -> list[str]:
+    active = guide_state.get("active_request")
+    active = active if isinstance(active, dict) else {}
     slots = _guide_slots(guide_state)
     missing: list[str] = []
-    if not slots.get("pet_id") and not slots.get("pet_type"):
+    category = slots.get("category")
+    pet_independent_categories = {"litter"}
+    if category not in pet_independent_categories and not slots.get("pet_type"):
         missing.append("pet")
-    if not slots.get("category"):
+    if not category:
         missing.append("category")
-    if (
-        not slots.get("budget")
-        and not slots.get("preferences")
-        and not (slots.get("category") and (slots.get("pet_id") or slots.get("pet_type")))
-    ):
-        missing.append("budget_or_preference")
+    if active.get("profile_policy") == "ask" and not slots.get("pet_type"):
+        missing.insert(0, "subject")
     return missing
 
 
@@ -396,7 +613,8 @@ async def _build_guide_history_context(
     old_messages = messages[:-GUIDE_RECENT_HISTORY_LIMIT]
     recent_messages = messages[-GUIDE_RECENT_HISTORY_LIMIT:]
     recent_history = _messages_to_history(recent_messages)
-    existing_summary = str(guide_state.get("history_summary") or "")
+    context = guide_state.setdefault("conversation_context", {})
+    existing_summary = str(context.get("history_summary") or "")
     if not old_messages:
         return existing_summary, recent_history
 
@@ -423,6 +641,7 @@ async def _build_guide_history_context(
             old_history,
             max_chars=GUIDE_HISTORY_SUMMARY_MAX_CHARS,
         )
+    context["history_summary"] = summary
     guide_state["history_summary"] = summary
     return summary, recent_history
 
@@ -506,28 +725,64 @@ async def _resolve_guide_pet_summary(
     guide_state: dict[str, Any],
     content: str,
 ) -> dict[str, Any] | None:
+    active = guide_state.get("active_request")
+    if not isinstance(active, dict) or active.get("subject_scope") != "owned_pet":
+        return None
+    if active.get("profile_policy") not in {"required", "allowed"}:
+        return None
     slots = _guide_slots(guide_state)
-    pet_id = session.pet_id or _safe_int(slots.get("pet_id"))
+    context = guide_state.get("conversation_context") or {}
+    pet_id = _safe_int(active.get("resolved_pet_id")) or _safe_int(slots.get("pet_id"))
     if pet_id is None:
+        # Listing names is delayed until the turn has passed the owned-pet policy gate.
         pets = await list_pets(db, user.id)
         for pet in pets:
             pet_name = str(getattr(pet, "name", "") or "").strip()
             if pet_name and pet_name in content:
                 pet_id = pet.id
-                session.pet_id = pet.id
-                slots["pet_id"] = pet.id
                 slots["pet_name"] = pet.name
-                slots["pet_type"] = pet.pet_type
                 break
+        if pet_id is None and any(marker in content for marker in ("它", "我家", "我的", "给我", "还是给")):
+            pet_id = _safe_int(context.get("default_pet_id"))
     if pet_id is None:
         return None
     pet_summary = await get_pet_detail_summary(db, user.id, pet_id)
     slots["pet_id"] = pet_id
+    active["resolved_pet_id"] = pet_id
+    context["last_owned_pet_id"] = pet_id
+    context["last_owned_pet_name"] = pet_summary.get("name")
+    sources = active.setdefault("slot_sources", {})
+    sources["pet_id"] = "current_turn" if pet_summary.get("name") in content else "session_default"
     if pet_summary.get("name"):
         slots["pet_name"] = pet_summary.get("name")
     if pet_summary.get("pet_type"):
         slots["pet_type"] = pet_summary.get("pet_type")
-    return pet_summary
+        sources.setdefault("pet_type", "profile")
+
+    category = slots.get("category")
+    common_fields = {"pet_id", "name", "pet_type", "breed", "body_size"}
+    category_fields = {
+        "food": {"birthday", "allergy_notes", "health_notes", "diet_preference"},
+        "snack": {"birthday", "allergy_notes", "health_notes", "diet_preference"},
+        "freeze_dried": {"birthday", "allergy_notes", "health_notes", "diet_preference"},
+        "toy": {"birthday", "behavior_notes", "product_preference"},
+        "bath": {"birthday", "health_notes", "care_notes", "product_preference"},
+        "leash": {"weight", "body_size", "product_preference"},
+    }
+    allowed_fields = common_fields | category_fields.get(str(category), set())
+    minimal_summary = {key: value for key, value in pet_summary.items() if key in allowed_fields}
+    if minimal_summary.get("body_size"):
+        slots.setdefault("size", minimal_summary["body_size"])
+        sources.setdefault("size", "profile")
+    for source_key, slot_key in (
+        ("allergy_notes", "avoid_ingredients"),
+        ("health_notes", "health_constraints"),
+        ("diet_preference", "diet_preference"),
+    ):
+        if minimal_summary.get(source_key):
+            slots.setdefault(slot_key, minimal_summary[source_key])
+            sources.setdefault(slot_key, "profile")
+    return minimal_summary
 
 
 def _pick_allowed_recommendations(
@@ -657,12 +912,29 @@ async def send_guide_message(
     session = await get_guide_session(db, user.id, session_id)
     risk_level = assess_guide_risk(content)
     guide_state = _load_guide_state(session)
-    _merge_guide_state_from_content(guide_state, content)
+    previous_active = guide_state.get("active_request")
+    previous_request_id = previous_active.get("request_id") if isinstance(previous_active, dict) else None
+    was_collecting = isinstance(previous_active, dict) and previous_active.get("status") == "collecting"
+    decision = _merge_guide_state_from_content(guide_state, content)
     pet_summary = await _resolve_guide_pet_summary(db, user, session, guide_state, content)
 
     missing_slots = _missing_guide_slots(guide_state)
-    guide_state["missing_slots"] = missing_slots
-    guide_state["stage"] = "clarifying" if missing_slots else "searching"
+    active = guide_state["active_request"]
+    active["missing_slots"] = missing_slots
+    active["status"] = "collecting" if missing_slots else "searching"
+    _sync_guide_state_mirrors(guide_state)
+    logger.info(
+        "guide_agent_turn_decision",
+        extra={
+            "session_id": session_id,
+            "user_id": user.id,
+            "request_id": active.get("request_id"),
+            "relation_to_previous": decision["relation_to_previous"],
+            "subject_scope": decision["subject_scope"],
+            "profile_policy": decision["profile_policy"],
+            "profile_loaded": pet_summary is not None,
+        },
+    )
 
     products: list[dict[str, Any]] = []
     rag_context = ""
@@ -671,9 +943,25 @@ async def send_guide_message(
         slots = _guide_slots(guide_state)
         requested_pet_type = infer_pet_type_from_guide_query(content)
         pet_type = requested_pet_type or slots.get("pet_type") or (pet_summary.get("pet_type") if pet_summary else None)
+        category_term = {
+            "food": "主粮",
+            "snack": "零食",
+            "freeze_dried": "冻干",
+            "toy": "玩具",
+            "bath": "洗护",
+            "litter": "猫砂",
+            "leash": "牵引",
+        }.get(str(slots.get("category")), "")
+        pet_term = "狗" if pet_type == "dog" else "猫" if pet_type == "cat" else ""
+        search_parts = [content]
+        if requested_pet_type is None and pet_term:
+            search_parts.append(pet_term)
+        if _extract_category(content) is None and category_term:
+            search_parts.append(category_term)
+        search_content = " ".join(search_parts)
         products = await _search_product_candidates(
             db,
-            content,
+            search_content,
             pet_type,
             limit,
             session_id=session_id,
@@ -692,6 +980,12 @@ async def send_guide_message(
         history_summary=history_summary,
         guide_state=guide_state,
         session_id=session_id,
+        request_id=str(active.get("request_id")),
+        resume_from_interrupt=(
+            was_collecting
+            and decision["relation_to_previous"] != "new"
+            and previous_request_id == active.get("request_id")
+        ),
     )
     guide_state = workflow_result.get("guide_state") or guide_state
     next_questions = workflow_result.get("next_questions", [])
@@ -711,6 +1005,22 @@ async def send_guide_message(
             products=products,
             pet_summary=pet_summary,
         )
+
+    active = guide_state.get("active_request") or active
+    if isinstance(active, dict):
+        asked = active.setdefault("asked_slot_keys", [])
+        if requires_user_confirmation:
+            active["status"] = "collecting"
+            for item in next_questions:
+                key = str(item.get("key") or "")
+                if key and key not in asked:
+                    asked.append(key)
+        else:
+            active["status"] = "completed"
+            active["recommendation_round"] = int(active.get("recommendation_round") or 0) + 1
+            context = guide_state.setdefault("conversation_context", {})
+            context["last_completed_request_id"] = active.get("request_id")
+    _sync_guide_state_mirrors(guide_state)
 
     user_message = AgentMessage(
         session_id=session_id,

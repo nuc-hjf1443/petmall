@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.rag_service import retrieve_platform_knowledge, retrieve_private_knowledge
-from core.agent_workflow import run_qa_agent_workflow
+from core.agent_workflow import delete_guide_checkpoints, run_qa_agent_workflow
 from core.errors import not_found
 from models.agent import AgentMessage, AgentSession
 from models.base import utc_now
@@ -185,8 +185,18 @@ async def delete_user_session(
     agent_type: str | None = None,
 ) -> None:
     session = await get_user_session(db, user_id, session_id, agent_type=agent_type)
+    guide_request_ids: list[str] = []
+    if session.agent_type == "guide" and session.context_summary:
+        try:
+            state = json.loads(session.context_summary)
+            context = state.get("conversation_context") if isinstance(state, dict) else None
+            if isinstance(context, dict) and isinstance(context.get("request_ids"), list):
+                guide_request_ids = [str(item) for item in context["request_ids"] if item]
+        except (json.JSONDecodeError, TypeError):
+            guide_request_ids = []
     await db.delete(session)
     await db.commit()
+    await delete_guide_checkpoints(session_id, guide_request_ids)
 
 
 def assess_risk(content: str) -> str:
