@@ -1020,6 +1020,63 @@ async def test_guide_graph_interrupts_and_resumes_same_request():
     assert resumed["guide_state"]["active_request"]["request_id"] == request_id
 
 
+async def test_guide_timeline_restores_every_recommendation_round_and_refines_latest(
+    test_context,
+    strong_password,
+    monkeypatch,
+):
+    client: AsyncClient = test_context["client"]
+    cache = test_context["cache"]
+    session_factory = test_context["session_factory"]
+    await seed_catalog(session_factory)
+
+    async def empty_retrieve_private_knowledge(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "services.guide_agent_service.retrieve_private_knowledge",
+        empty_retrieve_private_knowledge,
+    )
+    await register_user(client, cache, "13960000022", strong_password)
+    token = await login_user(client, "13960000022", strong_password)
+    created = await client.post(
+        "/agents/guide/sessions",
+        headers=auth_headers(token),
+        json={"title": "timeline rounds"},
+    )
+    session_id = created.json()["id"]
+
+    first = await client.post(
+        f"/agents/guide/sessions/{session_id}/messages",
+        headers=auth_headers(token),
+        json={"content": "Cat Food", "limit": 3},
+    )
+    assert first.status_code == 200, first.text
+    first_active = first.json()["guide_state"]["active_request"]
+
+    refined = await client.post(
+        f"/agents/guide/sessions/{session_id}/refine",
+        headers=auth_headers(token),
+        json={"content": "不满意当前推荐，我希望再便宜一点", "limit": 3},
+    )
+    assert refined.status_code == 200, refined.text
+    refined_active = refined.json()["guide_state"]["active_request"]
+    assert refined_active["request_id"] == first_active["request_id"]
+    assert refined_active["relation_to_previous"] == "refine"
+    assert refined_active["recommendation_round"] == 2
+
+    timeline = await client.get(
+        f"/agents/guide/sessions/{session_id}/timeline",
+        headers=auth_headers(token),
+    )
+    assert timeline.status_code == 200, timeline.text
+    assistant_messages = [
+        item for item in timeline.json()["messages"] if item["role"] == "assistant"
+    ]
+    assert len(assistant_messages) == 2
+    assert all(len(item["recommendations"]) == 1 for item in assistant_messages)
+
+
 async def test_guide_agent_does_not_recommend_cat_products_for_dog_request(
     test_context,
     strong_password,

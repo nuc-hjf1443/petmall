@@ -534,7 +534,11 @@ def _product_matches_pet_type(product: dict[str, Any], pet_type: str | None) -> 
     if not pet_type:
         return True
     product_pet_type = str(product.get("applicable_pet_type") or "").strip()
-    return not product_pet_type or product_pet_type == pet_type
+    return (
+        not product_pet_type
+        or product_pet_type == pet_type
+        or product_pet_type in {"universal", "cat_dog", "猫犬通用", "猫狗通用"}
+    )
 
 
 def _filter_products_by_pet_type(products: list[dict[str, Any]], pet_type: str | None) -> list[dict[str, Any]]:
@@ -680,9 +684,12 @@ async def _search_product_candidates(
     session_id: int,
     user_id: int,
 ) -> list[dict[str, Any]]:
-    for search_query in _guide_product_search_queries(query, pet_type):
+    candidates: dict[int, dict[str, Any]] = {}
+    retrieval_scores: dict[int, int] = {}
+    search_queries = [*_guide_product_search_queries(query, pet_type), ""]
+    for search_query in dict.fromkeys(search_queries):
         try:
-            products = await search_products_for_agent(db, search_query, pet_type, limit)
+            products = await search_products_for_agent(db, search_query, pet_type, max(30, limit * 6))
         except Exception as exc:
             logger.exception(
                 "guide_agent_product_search_failed",
@@ -696,11 +703,26 @@ async def _search_product_candidates(
                     "error": str(exc),
                 },
             )
-            return []
+            continue
         products = _filter_products_by_pet_type(products, pet_type)
-        if products:
-            return products
-    return []
+        for product in products:
+            product_id = int(product["id"])
+            candidates.setdefault(product_id, product)
+            channel_score = 3 if search_query == query.strip() else 2 if search_query else 0
+            retrieval_scores[product_id] = max(retrieval_scores.get(product_id, 0), channel_score)
+
+    universal_values = {"", "universal", "cat_dog", "猫犬通用", "猫狗通用"}
+    query_text = query.lower()
+
+    def ranking_key(product: dict[str, Any]) -> tuple[int, int, int, int]:
+        product_id = int(product["id"])
+        product_type = str(product.get("applicable_pet_type") or "")
+        type_rank = 0 if pet_type and product_type == pet_type else 1 if product_type in universal_values else 2
+        searchable = f"{product.get('title') or ''} {product.get('description') or ''}".lower()
+        keyword_hits = sum(1 for keyword in PRODUCT_INTENT_TERMS if keyword.lower() in query_text and keyword.lower() in searchable)
+        return (-retrieval_scores.get(product_id, 0), type_rank, -keyword_hits, -int(product.get("stock") or 0))
+
+    return sorted(candidates.values(), key=ranking_key)[:limit]
 
 
 async def _retrieve_rag_context(db: AsyncSession, user_id: int, session_id: int, query: str) -> tuple[str, str | None]:
@@ -925,6 +947,54 @@ async def list_latest_guide_recommendations(
         for item in result.scalars().all()
     ]
     return await _hydrate_recommendations(db, recommendations, session_id=session_id, user_id=user.id)
+
+
+async def get_guide_timeline(db: AsyncSession, user: User, session_id: int) -> dict[str, Any]:
+    session = await get_guide_session(db, user.id, session_id)
+    result = await db.execute(
+        select(AgentRecommendation)
+        .where(
+            AgentRecommendation.session_id == session_id,
+            AgentRecommendation.user_id == user.id,
+        )
+        .order_by(AgentRecommendation.message_id, AgentRecommendation.rank, AgentRecommendation.id)
+    )
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for item in result.scalars().all():
+        grouped.setdefault(item.message_id, []).append(
+            {
+                "product_id": item.product_id,
+                "sku_id": item.sku_id,
+                "rank": item.rank,
+                "reason": item.reason,
+                "caution": item.caution,
+                "source": item.source,
+                "source_detail": item.source_detail,
+                "score": item.score,
+                "matched_pet_fields": _json_list(item.matched_pet_fields),
+            }
+        )
+    messages = []
+    for message in sorted(session.messages, key=lambda item: item.id):
+        recommendations = await _hydrate_recommendations(
+            db,
+            grouped.get(message.id, []),
+            session_id=session_id,
+            user_id=user.id,
+        )
+        messages.append(
+            {
+                "id": message.id,
+                "session_id": message.session_id,
+                "role": message.role,
+                "content": message.content,
+                "risk_level": message.risk_level,
+                "references": message.references,
+                "created_at": message.created_at,
+                "recommendations": recommendations,
+            }
+        )
+    return {"session_id": session_id, "messages": messages}
 
 
 async def send_guide_message(

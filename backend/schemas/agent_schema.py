@@ -24,6 +24,10 @@ class GuideMessageCreate(BaseModel):
     limit: int = Field(default=5, ge=1, le=10)
 
 
+class GuideRefineCreate(GuideMessageCreate):
+    pass
+
+
 class AgentMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
